@@ -280,7 +280,7 @@ class MovieRecommender:
             logger.error("TMDB_KEY not configured")
             return None
 
-        key = f"tmdb:{title.lower()}"
+        key = f"tmdb:search:{title.lower()}"
         if not force_refresh:
             cached = cache.get('tmdb', key)
             if cached:
@@ -324,9 +324,52 @@ class MovieRecommender:
                 'runtime': det.get('runtime') or 0
             }
             cache.set('tmdb', key, out, ttl=60 * 60 * 24)  # cache 24h
+            # also cache by id for direct lookups
+            cache.set('tmdb', f"id:{movie_id}", out, ttl=60 * 60 * 24)
             return out
         except Exception:
             logger.exception("TMDb lookup failed for %s", title)
+            return None
+
+    def get_tmdb_details_by_id(self, movie_id, force_refresh=False):
+        """Obtener detalles por TMDb id (más fiable que buscar por título)."""
+        if not self.tmdb_key or not movie_id:
+            return None
+
+        key = f"id:{movie_id}"
+        if not force_refresh:
+            cached = cache.get('tmdb', key)
+            if cached:
+                return cached
+
+        try:
+            resp = self._safe_get(f"{self.tmdb_base}/movie/{movie_id}",
+                                  params={'api_key': self.tmdb_key, 'language': 'en-US', 'append_to_response': 'credits'},
+                                  service='tmdb')
+            if not resp:
+                return None
+            det = resp.json()
+
+            cre = det.get('credits', {})
+            director = next((c['name'] for c in cre.get('crew', []) if c.get('job') == 'Director'), "Unknown")
+
+            poster_path = det.get('poster_path')
+            poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
+
+            out = {
+                'tmdb_id': movie_id,
+                'title': det.get('title'),
+                'year': (det.get('release_date') or '')[:4] or None,
+                'director': director,
+                'genres': [g['name'] for g in det.get('genres', [])] if det.get('genres') else [],
+                'poster': poster_url,
+                'rating_tmdb': round(det.get('vote_average', 0), 1) if det.get('vote_average') is not None else None,
+                'runtime': det.get('runtime') or 0
+            }
+            cache.set('tmdb', key, out, ttl=60 * 60 * 24)
+            return out
+        except Exception:
+            logger.exception("TMDb lookup by id failed for %s", movie_id)
             return None
 
     def analyze_preferences(self, enriched_films):
@@ -357,7 +400,23 @@ class MovieRecommender:
         }
 
     def get_recommendations(self, enriched_films, count=DEFAULT_LIMIT_RECS, force_refresh=False):
-        seen = {f['title'].lower() for f in enriched_films}
+        """
+        Ahora excluimos por tmdb_id (primario) y por título (fallback).
+        Para obtener similares usamos /movie/{id}/similar y pedimos detalles por id cuando sea posible.
+        """
+        # Build sets of seen identifiers from the user's enriched films
+        seen_ids = set()
+        seen_titles = set()
+        for f in enriched_films:
+            if f.get('tmdb_id'):
+                try:
+                    seen_ids.add(int(f['tmdb_id']))
+                except Exception:
+                    # keep it as str fallback
+                    seen_ids.add(f['tmdb_id'])
+            if f.get('title'):
+                seen_titles.add(f['title'].lower())
+
         recs = []
         top_films = sorted(enriched_films, key=lambda x: x.get('user_rating', 0), reverse=True)[:10]
 
@@ -378,11 +437,22 @@ class MovieRecommender:
                 results = resp.json().get('results', [])[:8]
                 for m in results:
                     title = m.get('title')
+                    mid = m.get('id')
                     if not title:
                         continue
-                    if title.lower() in seen:
+                    # Exclude if TMDb id is one we've already seen
+                    if mid and (mid in seen_ids or str(mid) in seen_ids):
                         continue
-                    det = self.get_tmdb_details(title, force_refresh=force_refresh)
+                    # Exclude by title fallback
+                    if title.lower() in seen_titles:
+                        continue
+                    # Get details: prefer lookup by id
+                    det = None
+                    if mid:
+                        det = self.get_tmdb_details_by_id(mid, force_refresh=force_refresh)
+                    if not det:
+                        # fallback to search-by-title (less reliable)
+                        det = self.get_tmdb_details(title, force_refresh=force_refresh)
                     if det:
                         det['reason'] = f"Since you liked {film.get('title')}"
                         local.append(det)
@@ -392,17 +462,26 @@ class MovieRecommender:
             return local
 
         with ThreadPoolExecutor(max_workers=min(6, self.max_workers)) as ex:
-            futures = [ex.submit(process_similar, f) for f in top_films]
+            futures = [ex.submit(process_similar, f) for f in top_films if f.get('tmdb_id')]
             for f in as_completed(futures):
                 try:
                     recs.extend(f.result())
                 except Exception:
                     logger.exception("Error while gathering similar movies")
 
+        # Deduplicate by tmdb_id and preserve top count
         unique = {}
         for r in recs:
-            if r and r.get('tmdb_id') and r['tmdb_id'] not in unique:
-                unique[r['tmdb_id']] = r
+            if r and r.get('tmdb_id'):
+                try:
+                    key = int(r['tmdb_id'])
+                except Exception:
+                    key = r['tmdb_id']
+                if key not in unique:
+                    # don't return movies the user already saw (defense - check again)
+                    if key in seen_ids or str(key) in seen_ids:
+                        continue
+                    unique[key] = r
         out = list(unique.values())[:count]
         return out
 
