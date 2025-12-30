@@ -6,3 +6,4 @@ cachetools
 simple-justwatch-python-api
 redis
 gunicorn
+dotenv
