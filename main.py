@@ -11,21 +11,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from functools import wraps
 from dotenv import load_dotenv
+
 load_dotenv()
-
-print("DEBUG: main import start", flush=True)
-
-
-# Caching options
-try:
-    import redis
-except Exception:
-    redis = None
-
-try:
-    from cachetools import TTLCache
-except Exception:
-    TTLCache = None
 
 # Basic logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +20,6 @@ logger = logging.getLogger("letterboxd-recommender")
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
-print("DEBUG: Flask app created", flush=True)
 
 # Configurable defaults via env vars
 TMDB_KEY = os.getenv("TMDB_KEY")
@@ -57,14 +43,22 @@ class RateLimiter:
                 time.sleep(self.min_interval - diff)
             self._last = time.time()
 
-# Cache wrapper that uses Redis if available else an in-memory TTLCache
+# Caching options (lazy Redis init, fallback to in-memory TTL/dict caches)
+try:
+    import redis
+except Exception:
+    redis = None
+
+try:
+    from cachetools import TTLCache
+except Exception:
+    TTLCache = None
+
 class Cache:
     def __init__(self):
         self.redis = None
-        self._redis_initialized = False
         self._redis_attempted = False
-
-        # Fallback caches (simple TTL caches / dicts)
+        # fallback caches
         self.caches = {}
         if TTLCache is None:
             self.caches['tmdb'] = {}
@@ -78,7 +72,6 @@ class Cache:
             self.caches['user_scrape'] = TTLCache(maxsize=500, ttl=60 * 30)
 
     def _init_redis(self):
-        # intenta inicializar redis SOLO la primera vez que se necesita
         if self._redis_attempted:
             return
         self._redis_attempted = True
@@ -86,7 +79,6 @@ class Cache:
             return
         try:
             self.redis = redis.from_url(REDIS_URL, decode_responses=True)
-            # ping con timeout corto para evitar bloqueos largos
             self.redis.ping()
             logger.info("Using Redis for cache")
         except Exception as e:
@@ -109,7 +101,6 @@ class Cache:
             pass
 
     def get(self, namespace, key):
-        # inicializa redis si no lo hemos hecho
         if not self._redis_attempted:
             self._init_redis()
         if self.redis:
@@ -117,7 +108,7 @@ class Cache:
         else:
             cache = self.caches.get(namespace)
             try:
-                return cache.get(key)
+                return cache.get(key) if cache is not None else None
             except Exception:
                 return None
 
@@ -136,7 +127,6 @@ class Cache:
             except Exception:
                 pass
 
-
 cache = Cache()
 
 # HTTP session with retries & backoff
@@ -154,8 +144,10 @@ def make_session():
     return s
 
 session = make_session()
-tmdb_limiter = RateLimiter(min_interval=0.25)      # ~4 reqs/sec default
-letterboxd_limiter = RateLimiter(min_interval=0.35) # ~3 reqs/sec to be polite
+
+# Rate limiters
+tmdb_limiter = RateLimiter(min_interval=0.25)
+letterboxd_limiter = RateLimiter(min_interval=0.35)
 streaming_limiter = RateLimiter(min_interval=0.3)
 
 class MovieRecommender:
@@ -175,7 +167,6 @@ class MovieRecommender:
         return self.country_names.get(self.country, self.country)
 
     def _safe_get(self, url, params=None, headers=None, max_retries=2, service='generic'):
-        """Safe GET with session retries and small backoff. Returns Response or None."""
         limiter = {'tmdb': tmdb_limiter, 'letterboxd': letterboxd_limiter, 'streaming': streaming_limiter}.get(service)
         if limiter:
             limiter.wait()
@@ -186,13 +177,11 @@ class MovieRecommender:
                 if r.status_code == 200:
                     return r
                 elif r.status_code == 429:
-                    # rate limited — wait longer
                     sleep_time = (attempt + 1) * 1.5
                     logger.warning("429 from %s. sleeping %s", url, sleep_time)
                     time.sleep(sleep_time)
                 else:
                     logger.debug("Non-200 %s for %s", r.status_code, url)
-                    # small sleep and retry
                     time.sleep(0.4)
             except requests.RequestException as e:
                 logger.debug("Request exception %s for %s", e, url)
@@ -200,7 +189,6 @@ class MovieRecommender:
         return None
 
     def get_page_count(self, username):
-        """Return number of 'films' pages for username. Returns 0 on error."""
         if not username:
             return 0
         url = f"{self.letterboxd_base}/{username}/films/"
@@ -223,8 +211,6 @@ class MovieRecommender:
             return 0
 
     def get_all_rated_films(self, username, max_pages=None):
-        """Scrape all rated films (with rating) and return list of dicts and pages count.
-        Uses caching for short TTL to prevent repeated scrapes."""
         if not username:
             return [], 0
 
@@ -232,7 +218,6 @@ class MovieRecommender:
         cache_key = f"{username}:pages"
         cached = cache.get('user_scrape', cache_key)
         if cached:
-            # cached structure: {pages, films}
             logger.info("Using cached scrape for %s", username)
             return cached.get('films', []), cached.get('pages', 0)
 
@@ -254,7 +239,6 @@ class MovieRecommender:
                 if not r:
                     return []
                 soup = BeautifulSoup(r.text, 'html.parser')
-                # find poster containers that include viewingdata
                 items = soup.find_all('li', class_='poster-container') or soup.find_all('li', class_='griditem')
                 page_films = []
                 for item in items:
@@ -285,7 +269,6 @@ class MovieRecommender:
                     except Exception:
                         logger.exception("Error scraping a page for %s", username)
 
-            # store in cache for short TTL
             cache.set('user_scrape', cache_key, {'pages': pages, 'films': films}, ttl=60 * 30)
             return films, pages
         except Exception as e:
@@ -293,7 +276,6 @@ class MovieRecommender:
             return [], 0
 
     def get_tmdb_details(self, title, force_refresh=False):
-        """Return detailed TMDb info for a title. Caches results."""
         if not self.tmdb_key:
             logger.error("TMDB_KEY not configured")
             return None
@@ -304,7 +286,6 @@ class MovieRecommender:
             if cached:
                 return cached
 
-        # 1) search
         try:
             resp = self._safe_get(f"{self.tmdb_base}/search/movie",
                                   params={'api_key': self.tmdb_key, 'query': title, 'language': 'en-US'}, service='tmdb')
@@ -319,7 +300,6 @@ class MovieRecommender:
             if not movie_id:
                 return None
 
-            # 2) fetch details with credits appended (reduces number of API calls)
             resp2 = self._safe_get(f"{self.tmdb_base}/movie/{movie_id}",
                                    params={'api_key': self.tmdb_key, 'language': 'en-US', 'append_to_response': 'credits'},
                                    service='tmdb')
@@ -350,7 +330,6 @@ class MovieRecommender:
             return None
 
     def analyze_preferences(self, enriched_films):
-        """Return top genres, directors, decades (fixed logic & safe counts)."""
         genres = []
         directors = []
         decades = []
@@ -378,14 +357,11 @@ class MovieRecommender:
         }
 
     def get_recommendations(self, enriched_films, count=DEFAULT_LIMIT_RECS, force_refresh=False):
-        """For top user-rated films, fetch similar movies from TMDb and return enriched dets.
-        Uses caching for similar endpoints and limits concurrent TMDb calls."""
         seen = {f['title'].lower() for f in enriched_films}
         recs = []
         top_films = sorted(enriched_films, key=lambda x: x.get('user_rating', 0), reverse=True)[:10]
 
         def process_similar(film):
-            # cache key for similar lists
             cache_key = f"similar:{film.get('tmdb_id')}"
             if not force_refresh:
                 cached = cache.get('similar', cache_key)
@@ -406,12 +382,10 @@ class MovieRecommender:
                         continue
                     if title.lower() in seen:
                         continue
-                    # reuse tmdb detail cache by title
                     det = self.get_tmdb_details(title, force_refresh=force_refresh)
                     if det:
                         det['reason'] = f"Since you liked {film.get('title')}"
                         local.append(det)
-                # store
                 cache.set('similar', cache_key, local, ttl=60 * 60 * 24)
             except Exception:
                 logger.exception("Failed parsing similar for %s", film)
@@ -425,7 +399,6 @@ class MovieRecommender:
                 except Exception:
                     logger.exception("Error while gathering similar movies")
 
-        # deduplicate by tmdb_id and limit
         unique = {}
         for r in recs:
             if r and r.get('tmdb_id') and r['tmdb_id'] not in unique:
@@ -434,7 +407,6 @@ class MovieRecommender:
         return out
 
     def get_streaming(self, title, year=None, force_refresh=False):
-        """Resolve streaming providers using simplejustwatchapi. Caching applied."""
         cache_key = f"{title.lower()}:{year or ''}"
         if not force_refresh:
             cached = cache.get('streaming', cache_key)
@@ -442,9 +414,7 @@ class MovieRecommender:
                 return cached
 
         try:
-            # simplejustwatchapi uses internal calls — wrap with limiter
             streaming_limiter.wait()
-            # Import on-demand to avoid hard dependency if not needed in tests
             from simplejustwatchapi import justwatch as sjw
             entries = sjw.search(title, country=self.country, language='en', count=1, best_only=True)
             if entries:
@@ -462,14 +432,15 @@ class MovieRecommender:
 # --- DEBUG / HEALTH ROUTES (temporary, remove when fixed) ---
 @app.route('/_health', methods=['GET'])
 def health():
-    print("DEBUG: /_health called", flush=True)
     return jsonify({"status": "ok"}), 200
 
-@app.route('/', methods=['GET'])
-def root_quick():
-    # Respuesta inmediata y simple para que el PaaS reciba 200 OK
-    print("DEBUG: / (root) called", flush=True)
-    return jsonify({"status": "ok"}), 200
+@app.route("/")
+def home():
+    # serve index.html from repo root (static_folder='.')
+    try:
+        return app.send_static_file('index.html')
+    except Exception:
+        return jsonify({"status": "ok"}), 200
 # --------------------------------------------------------------
 
 @app.route('/api/get_pages', methods=['POST'])
@@ -572,7 +543,7 @@ def recommend():
 import atexit
 @atexit.register
 def on_exit():
-    print("DEBUG: worker exiting", flush=True)
+    logger.info("worker exiting")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
