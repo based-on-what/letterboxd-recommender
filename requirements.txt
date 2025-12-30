@@ -3,6 +3,6 @@ flask-cors
 requests
 beautifulsoup4
 cachetools
-simplejustwatchapi
+simple-justwatch-python-api
 redis
 gunicorn
