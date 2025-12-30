@@ -1,681 +1,615 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Letterboxd Recommender Pro</title>
-    <style>
-        body {
-            background-color: #121212;
-            color: #e0e0e0;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            line-height: 1.6;
-            padding: 20px;
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Letterboxd Recommender Pro</title>
+  <style>
+    /* Base */
+    body {
+      background-color: #121212;
+      color: #e0e0e0;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      line-height: 1.6;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      position: relative;
+      padding: 10px;
+    }
+
+    /* Timer top right corner (final) */
+    .final-timer {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 189, 0, 0.95);
+      color: #000;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 1.05rem;
+      font-weight: bold;
+      font-family: monospace;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      display: none;
+      z-index: 1000;
+    }
+
+    /* Input section */
+    .input-section {
+      background: #1e1e1e;
+      padding: 2rem;
+      border-radius: 12px;
+      border: 1px solid #333;
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    h1 {
+      font-size: 2.2rem;
+      margin-bottom: 0.4rem;
+      color: #00e054;
+      text-shadow: 0 0 10px rgba(0, 224, 84, 0.28);
+      letter-spacing: -0.5px;
+    }
+    .country-tag {
+      font-size: 0.9rem;
+      color: #a0a0a0;
+      margin: 10px 0;
+    }
+    .input-group {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+    input {
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #222;
+      color: #fff;
+      width: 300px;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    }
+    button {
+      padding: 12px 24px;
+      background: #00e054;
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      transition: all 0.18s;
+    }
+    button:hover { background: #00ff5e; transform: translateY(-2px); }
+    button:disabled { background: #555; cursor: not-allowed; transform: none; }
+
+    /* Loading / chronometer */
+    .loading-box {
+      display: none;
+      margin-top: 20px;
+      padding: 20px;
+      background: #1e1e1e;
+      border-radius: 8px;
+      border: 1px solid #ffbd00;
+    }
+    .timer {
+      font-size: 1.4rem;
+      color: #ffbd00;
+      font-family: monospace;
+      margin: 10px 0;
+    }
+    .estimate { font-size: 0.9rem; color: #888; }
+
+    /* Preferences block */
+    .preferences {
+      background: #1e1e1e;
+      padding: 1rem;
+      border-radius: 8px;
+      border: 1px solid #333;
+      margin-bottom: 1.6rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.22);
+      display: none;
+    }
+    .preferences h2 {
+      font-size: 1.4rem;
+      margin: 0 0 1rem 0;
+      color: #e0e0e0;
+      border-left: 4px solid #00e054;
+      padding-left: 12px;
+    }
+    .pref-item { margin-bottom: 0.6rem; font-size: 0.92rem; line-height: 1.4; }
+    .pref-label { color: #00e054; font-weight: bold; }
+
+    /* Controls */
+    .controls {
+      background: #1e1e1e;
+      padding: 1.2rem;
+      border-radius: 8px;
+      border: 1px solid #333;
+      margin-bottom: 1.6rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.22);
+      display: none;
+    }
+    .controls-section { margin-bottom: 1rem; }
+    .controls-title { font-size: 1rem; color: #00e054; font-weight: bold; margin-bottom: 0.8rem; }
+    .filter-group { display:flex; flex-wrap:wrap; gap:12px; align-items: center; justify-content: flex-start;}
+    .checkbox-label {
+        display: inline-flex;        /* importante: inline para que no rompa el flujo y no se estire */
+        align-items: center;
+        gap: 8px;                    /* espacio entre checkbox y texto */
+        white-space: nowrap;         /* evita salto de línea dentro del label */
+        padding: 6px 10px;          /* ajuste de padding a tu gusto */
+        font-size: 0.85rem;
+        color: #e0e0e0;
+        background: rgba(255,255,255,0.03);
+        border-radius: 6px;
+        border: 1px solid #333;
+        transition: all 0.18s;
+        cursor: pointer;
+
+        /* clave para que no crezcan ni se encojan */
+        flex: 0 0 auto;
+        width: auto;
+        max-width: none;
         }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            position: relative;
-            padding: 10px;
-        }
-        
-        /* Timer top right corner */
-        .final-timer {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: rgba(255, 189, 0, 0.95);
-            color: #000;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 1.1rem;
-            font-weight: bold;
-            font-family: monospace;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-            display: none;
-            z-index: 1000;
-        }
-        
-        .input-section {
-            background: #1e1e1e;
-            padding: 2rem;
-            border-radius: 12px;
-            border: 1px solid #333;
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-        
-        h1 {
-            font-size: 2.2rem;
-            margin-bottom: 0.4rem;
-            color: #00e054;
-            text-shadow: 0 0 10px rgba(0, 224, 84, 0.4);
-            letter-spacing: -0.5px;
-        }
-        
-        .country-tag {
-            font-size: 0.9rem;
-            color: #a0a0a0;
-            margin: 10px 0;
-        }
-        
-        .input-group {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        }
-        
-        input {
-            padding: 12px;
-            border-radius: 6px;
-            border: 1px solid #444;
-            background: #222;
-            color: #fff;
-            width: 300px;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-        }
-        
-        button {
-            padding: 12px 24px;
-            background: #00e054;
-            color: #000;
-            border: none;
-            border-radius: 6px;
-            font-weight: bold;
-            cursor: pointer;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            transition: all 0.2s;
-        }
-        
-        button:hover {
-            background: #00ff5e;
-            transform: translateY(-2px);
-        }
-        
-        button:disabled {
-            background: #555;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .loading-box {
-            display: none;
-            margin-top: 20px;
-            padding: 20px;
-            background: #1e1e1e;
-            border-radius: 8px;
-            border: 1px solid #ffbd00;
-        }
-        
-        .timer {
-            font-size: 1.5rem;
-            color: #ffbd00;
-            font-family: monospace;
-            margin: 10px 0;
-        }
-        
-        .estimate {
-            font-size: 0.9rem;
-            color: #888;
-        }
-        
-        /* Preferences block */
-        .preferences {
-            background: #1e1e1e;
-            padding: 1rem;
-            border-radius: 8px;
-            border: 1px solid #333;
-            margin-bottom: 1.6rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.25);
-            display: none;
-        }
-        
-        .preferences h2 {
-            font-size: 1.4rem;
-            margin: 0 0 1rem 0;
-            color: #e0e0e0;
-            border-left: 4px solid #00e054;
-            padding-left: 12px;
-        }
-        
-        .pref-item {
-            margin-bottom: 0.6rem;
-            font-size: 0.92rem;
-            line-height: 1.5;
-        }
-        
-        .pref-label {
-            color: #00e054;
-            font-weight: bold;
-        }
-        
-        /* Filter and sort controls */
-        .controls {
-            background: #1e1e1e;
-            padding: 1.2rem;
-            border-radius: 8px;
-            border: 1px solid #333;
-            margin-bottom: 1.6rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.25);
-            display: none;
-        }
-        
-        .controls-section {
-            margin-bottom: 1rem;
-        }
-        
-        .controls-section:last-child {
-            margin-bottom: 0;
-        }
-        
-        .controls-title {
-            font-size: 1rem;
-            color: #00e054;
-            font-weight: bold;
-            margin-bottom: 0.8rem;
-        }
-        
-        .filter-group {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-        
-        .checkbox-label {
-            display: flex;
-            align-items: center;
-            cursor: pointer;
-            font-size: 0.85rem;
-            color: #e0e0e0;
-            padding: 6px 12px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 6px;
-            border: 1px solid #333;
-            transition: all 0.2s;
-        }
-        
-        .checkbox-label:hover {
-            background: rgba(0, 224, 84, 0.1);
-            border-color: #00e054;
-        }
-        
+
+        /* asegúrate que el input no intente forzar ancho */
         .checkbox-label input[type="checkbox"] {
-            margin-right: 8px;
-            cursor: pointer;
+        width: auto;
+        margin: 0; /* controla el espacio con gap en el label */
+        transform: scale(1); /* si quieres reducir el checkbox, ajusta aquí */
         }
-        
-        .sort-group {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
+
+        /* hover opcional */
+        .checkbox-label:hover {
+        background: rgba(0, 224, 84, 0.06);
+        border-color: #00e054;
         }
-        
-        .sort-button {
-            padding: 8px 16px;
-            background: #00e054;
-            color: #000;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-        }
-        
-        .sort-button:hover {
-            background: #00ff5e;
-            transform: translateY(-2px);
-        }
-        
-        .sort-button.active {
-            background: #ffbd00;
-        }
-        
-        h2.results-title {
-            font-size: 1.4rem;
-            margin: 1.2rem 0 0.6rem;
-            color: #e0e0e0;
-            border-left: 4px solid #00e054;
-            padding-left: 12px;
-        }
-        
-        .movies-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            gap: 18px;
-        }
-        
-        .movie-card {
-            background: #1e1e1e;
-            border-radius: 8px;
-            overflow: hidden;
-            border: 1px solid #333;
-            transition: transform 0.18s ease, box-shadow 0.18s ease;
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            min-height: 320px;
-        }
-        
-        .movie-card:hover {
-            transform: translateY(-6px);
-            box-shadow: 0 14px 30px rgba(0,0,0,0.55);
-            border-color: #00e054;
-        }
-        
-        .movie-poster {
-            width: 100%;
-            aspect-ratio: 2/3;
-            object-fit: cover;
-            display: block;
-            flex-shrink: 0;
-        }
-        
-        .movie-info {
-            padding: 12px;
-            flex-grow: 1;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .movie-title {
-            font-weight: bold;
-            font-size: 1rem;
-            margin-bottom: 6px;
-            line-height: 1.2;
-            color: #e0e0e0;
-        }
-        
-        .movie-meta {
-            font-size: 0.82rem;
-            color: #a0a0a0;
-            margin-bottom: 4px;
-        }
-        
-        .movie-runtime {
-            font-size: 0.78rem;
-            color: #b0b0b0;
-            margin-bottom: 8px;
-        }
-        
-        .movie-rating {
-            font-weight: bold;
-            color: #ffbd00;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
-        }
-        
-        .movie-reason {
-            font-size: 0.79rem;
-            font-style: italic;
-            color: #a0a0a0;
-            margin-bottom: 10px;
-            background: rgba(255,255,255,0.03);
-            padding: 6px 8px;
-            border-radius: 4px;
-        }
-        
-        .streaming {
-            margin-top: auto;
-            padding-top: 10px;
-            border-top: 1px dashed #333;
-        }
-        
-        .streaming-title {
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #a0a0a0;
-            margin-bottom: 6px;
-        }
-        
-        .platforms {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-        }
-        
-        .platform {
-            background: #00e054;
-            color: #000;
-            font-size: 0.68rem;
-            font-weight: bold;
-            padding: 4px 8px;
-            border-radius: 4px;
-        }
-        
-        .no-streaming {
-            font-size: 0.75rem;
-            color: #888;
-        }
-        
-        #results {
-            display: none;
-        }
-        
-        @media (max-width: 900px) {
-            h1 { font-size: 1.9rem; }
-            .movies-grid { gap: 14px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-            .movie-card { min-height: 300px; }
-            .final-timer { font-size: 0.95rem; padding: 10px 16px; }
-        }
-        
-        @media (max-width: 600px) {
-            body { padding: 12px; }
-            h1 { font-size: 1.6rem; }
-            .movies-grid { gap: 12px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
-            .movie-card { min-height: 280px; }
-            .movie-title { font-size: 0.95rem; }
-            .filter-group { gap: 8px; }
-            .checkbox-label { font-size: 0.8rem; padding: 5px 10px; }
-            .final-timer { 
-                top: 10px; 
-                right: 10px; 
-                font-size: 0.85rem; 
-                padding: 8px 12px; 
-            }
-        }
-    </style>
+    .sort-group { display:flex; gap:12px; flex-wrap:wrap; }
+    .sort-button {
+      padding:8px 16px; background:#00e054; color:#000; border:none; border-radius:6px; font-size:0.85rem;
+      font-weight:bold; cursor:pointer; transition:all 0.18s; font-family: 'Consolas', monospace;
+    }
+    .sort-button:hover { background:#00ff5e; transform: translateY(-2px); }
+    .sort-button.active { background:#ffbd00; }
+
+    h2.results-title {
+      font-size: 1.4rem;
+      margin: 1.2rem 0 0.6rem;
+      color: #e0e0e0;
+      border-left: 4px solid #00e054;
+      padding-left: 12px;
+    }
+
+    /* Movies grid & cards */
+    .movies-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 18px;
+      margin-top: 12px;
+    }
+    .movie-card {
+      background: #1e1e1e;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #2b2b2b;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 330px;
+      gap: 8px;
+      padding-bottom: 6px;
+    }
+    .movie-card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 14px 30px rgba(0,0,0,0.6);
+      border-color: #00e054;
+    }
+
+    .movie-poster {
+      width: 100%;
+      aspect-ratio: 2/3;
+      object-fit: cover;
+      display: block;
+      flex-shrink: 0;
+    }
+
+    .movie-info {
+      padding: 12px;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .movie-title {
+      font-weight: bold;
+      font-size: 1rem;
+      margin-bottom: 6px;
+      line-height: 1.2;
+      color: #e0e0e0;
+    }
+
+    .movie-meta { font-size: 0.82rem; color: #a0a0a0; margin-bottom: 6px; }
+    .movie-runtime { font-size: 0.78rem; color: #b0b0b0; margin-bottom: 6px; }
+    .movie-rating { font-weight: bold; color: #ffbd00; margin-bottom: 8px; font-size:0.9rem; }
+    .movie-reason {
+      font-size: 0.79rem;
+      font-style: italic;
+      color: #a0a0a0;
+      margin-bottom: 10px;
+      background: rgba(255,255,255,0.03);
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+
+    .streaming {
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px dashed #333;
+    }
+    .streaming-title {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #a0a0a0;
+      margin-bottom: 6px;
+    }
+
+    /* Platform badges (compact) */
+    .platforms { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .platform {
+      background: #00e054;
+      color: #000;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      box-sizing: border-box;
+    }
+    .no-streaming { font-size:0.8rem; color:#888; }
+
+    /* Hide results initially */
+    #results { display: none; }
+
+    /* Responsive tweaks */
+    @media (max-width: 900px) {
+      h1 { font-size: 1.9rem; }
+      .movies-grid { gap: 14px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+      .movie-card { min-height: 300px; }
+      .final-timer { font-size: 0.95rem; padding: 10px 16px; top: 12px; right: 12px; }
+    }
+    @media (max-width: 600px) {
+      body { padding: 12px; }
+      h1 { font-size: 1.6rem; }
+      .movies-grid { gap: 12px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+      .movie-card { min-height: 280px; }
+      .movie-title { font-size: 0.95rem; }
+      .filter-group { gap: 8px; }
+      .checkbox-label { font-size: 0.8rem; padding: 5px 10px; }
+      .final-timer {
+        top: 10px;
+        right: 10px;
+        font-size: 0.85rem;
+        padding: 8px 12px;
+      }
+    }
+  </style>
 </head>
 <body>
-    <div class="final-timer" id="finalTimer"></div>
-    
-    <div class="container">
-        <div class="input-section">
-            <h1>🎬 Letterboxd Recommender Pro</h1>
-            <div id="user-location" class="country-tag">Detecting location...</div>
-            <div class="input-group">
-                <input type="text" id="username" placeholder="Your Letterboxd username" onkeypress="if(event.key==='Enter')startProcess()">
-                <button id="btn" onclick="startProcess()">Generate Recommendations</button>
-            </div>
 
-            <div id="loading" class="loading-box">
-                <div class="timer" id="chronometer">00:00.00</div>
-                <div id="status-text">Analyzing profile...</div>
-                <div class="estimate" id="estimate-text"></div>
-            </div>
-        </div>
+  <div class="final-timer" id="finalTimer"></div>
 
-        <div id="results">
-            <!-- Preferences block -->
-            <div class="preferences" id="preferences-block">
-                <h2>📊 Your Cinematic Profile</h2>
-                <div class="pref-item">
-                    <span class="pref-label">Favorite genres:</span> 
-                    <span id="pref-genres">N/A</span>
-                </div>
-                <div class="pref-item">
-                    <span class="pref-label">Directors you love:</span> 
-                    <span id="pref-directors">N/A</span>
-                </div>
-                <div class="pref-item">
-                    <span class="pref-label">Preferred decades:</span> 
-                    <span id="pref-decades">N/A</span>
-                </div>
-            </div>
+  <div class="container">
+    <div class="input-section">
+      <h1>🎬 Letterboxd Recommender Pro</h1>
+      <div id="user-location" class="country-tag">Detecting location...</div>
+      <div class="input-group">
+        <input type="text" id="username" placeholder="Your Letterboxd username" onkeypress="if(event.key==='Enter')startProcess()">
+        <button id="btn" onclick="startProcess()">Generate Recommendations</button>
+      </div>
 
-            <!-- Filter and sort controls -->
-            <div class="controls" id="controls-block">
-                <div class="controls-section">
-                    <div class="controls-title">🎬 Filter by Streaming Platform</div>
-                    <div class="filter-group" id="streaming-filters"></div>
-                </div>
-                <div class="controls-section">
-                    <div class="controls-title">📊 Sort Movies</div>
-                    <div class="sort-group">
-                        <button class="sort-button" onclick="sortMovies('rating-desc')" id="btn-rating-desc">⭐ Rating ↓</button>
-                        <button class="sort-button" onclick="sortMovies('rating-asc')" id="btn-rating-asc">⭐ Rating ↑</button>
-                        <button class="sort-button" onclick="sortMovies('runtime-desc')" id="btn-runtime-desc">⏱️ Runtime ↓</button>
-                        <button class="sort-button" onclick="sortMovies('runtime-asc')" id="btn-runtime-asc">⏱️ Runtime ↑</button>
-                        <button class="sort-button active" onclick="sortMovies('reset')" id="btn-reset">🔄 Original Order</button>
-                    </div>
-                </div>
-            </div>
-
-            <h2 class="results-title">🎯 Recommended Movies</h2>
-            <div class="movies-grid" id="grid"></div>
-        </div>
+      <div id="loading" class="loading-box">
+        <div class="timer" id="chronometer">00:00.00</div>
+        <div id="status-text">Analyzing profile...</div>
+        <div class="estimate" id="estimate-text"></div>
+      </div>
     </div>
 
-    <script>
-        let startTime;
-        let timerInterval;
-        let userCountry = 'CL';
-        let originalOrder = [];
-        let finalElapsedTime = '';
+    <div id="results">
+      <!-- Preferences block -->
+      <div class="preferences" id="preferences-block">
+        <h2>📊 Your Cinematic Profile</h2>
+        <div class="pref-item">
+          <span class="pref-label">Favorite genres:</span>
+          <span id="pref-genres">N/A</span>
+        </div>
+        <div class="pref-item">
+          <span class="pref-label">Directors you love:</span>
+          <span id="pref-directors">N/A</span>
+        </div>
+        <div class="pref-item">
+          <span class="pref-label">Preferred decades:</span>
+          <span id="pref-decades">N/A</span>
+        </div>
+      </div>
 
-        // Detect country by IP on load
-        window.onload = async () => {
-            try {
-                const res = await fetch('https://ipapi.co/json/');
-                const data = await res.json();
-                userCountry = data.country_code || 'CL';
-                document.getElementById('user-location').textContent = `📍 Searching availability in: ${data.country_name}`;
-            } catch (e) {
-                document.getElementById('user-location').textContent = `📍 Location: ${data.country_name}`;
-            }
-        };
+      <!-- Filter and sort controls -->
+      <div class="controls" id="controls-block">
+        <div class="controls-section">
+          <div class="controls-title">🎬 Filter by Streaming Platform</div>
+          <div class="filter-group" id="streaming-filters"></div>
+        </div>
+        <div class="controls-section">
+          <div class="controls-title">📊 Sort Movies</div>
+          <div class="sort-group">
+            <button class="sort-button" onclick="sortMovies('rating-desc')" id="btn-rating-desc">⭐ Rating ↓</button>
+            <button class="sort-button" onclick="sortMovies('rating-asc')" id="btn-rating-asc">⭐ Rating ↑</button>
+            <button class="sort-button" onclick="sortMovies('runtime-desc')" id="btn-runtime-desc">⏱️ Runtime ↓</button>
+            <button class="sort-button" onclick="sortMovies('runtime-asc')" id="btn-runtime-asc">⏱️ Runtime ↑</button>
+            <button class="sort-button active" onclick="sortMovies('reset')" id="btn-reset">🔄 Original Order</button>
+          </div>
+        </div>
+      </div>
 
-        function updateTimer() {
-            const now = new Date();
-            const diff = now - startTime;
-            const h = Math.floor(diff / 3600000);
-            const m = Math.floor((diff % 3600000) / 60000);
-            const s = Math.floor((diff % 60000) / 1000);
-            const ms = Math.floor((diff % 1000) / 10);
-            document.getElementById('chronometer').textContent = 
-                `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+      <h2 class="results-title" style="margin-top:2.5rem;">🎯 Recommended Movies</h2>
+      <div class="movies-grid" id="grid"></div>
+    </div>
+  </div>
+
+  <script>
+    let startTime;
+    let timerInterval;
+    let userCountry = 'CL';
+    let originalOrder = [];
+    let finalElapsedTime = '';
+    const API_BASE = window.location.origin + '/api';
+
+    // Detect country by IP on load
+    window.onload = async () => {
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        userCountry = data.country_code || 'CL';
+        document.getElementById('user-location').textContent = `📍 Searching availability in: ${data.country_name}`;
+      } catch (e) {
+        document.getElementById('user-location').textContent = `📍 Location: unknown`;
+      }
+    };
+
+    function updateTimer() {
+      const now = new Date();
+      const diff = now - startTime;
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      const ms = Math.floor((diff % 1000) / 10);
+      document.getElementById('chronometer').textContent =
+        `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+    }
+
+    function formatFinalTime(diff) {
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function formatRuntime(minutes) {
+      if (!minutes || minutes === 0) return 'N/A';
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      return h > 0 ? `${h}h ${m}min` : `${m}min`;
+    }
+
+    async function startProcess() {
+      const username = document.getElementById('username').value.trim();
+      if (!username) {
+        alert('Please enter a Letterboxd username');
+        return;
+      }
+
+      // Reset UI
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('results').style.display = 'none';
+      document.getElementById('preferences-block').style.display = 'none';
+      document.getElementById('controls-block').style.display = 'none';
+      document.getElementById('finalTimer').style.display = 'none';
+      document.getElementById('btn').disabled = true;
+      document.getElementById('status-text').textContent = "Calculating library size...";
+
+      startTime = new Date();
+      timerInterval = setInterval(updateTimer, 50);
+
+      try {
+        // Get number of pages for estimate
+        const pageRes = await fetch(`${API_BASE}/get_pages`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({username})
+        });
+        const pageData = await pageRes.json();
+
+        // Updated estimate: 55 seconds per page + overhead
+        const estSeconds = Math.round((pageData.pages * 55) + 15);
+        const estMinutes = Math.floor(estSeconds / 60);
+        const estSecs = estSeconds % 60;
+        document.getElementById('estimate-text').textContent =
+          `Estimated time: ~${estMinutes}m ${estSecs}s (Library of ${pageData.pages} pages)`;
+        document.getElementById('status-text').textContent = "Searching movies and streaming...";
+
+        // Main API call
+        const response = await fetch(`${API_BASE}/recommend`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({username, country: userCountry})
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'API error');
+
+        // Calculate final time
+        const endTime = new Date();
+        const totalTime = endTime - startTime;
+        finalElapsedTime = formatFinalTime(totalTime);
+
+        renderMovies(data);
+
+      } catch (e) {
+        alert("Error: " + e.message);
+      } finally {
+        clearInterval(timerInterval);
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('btn').disabled = false;
+
+        // Show final timer in top right corner
+        if (finalElapsedTime) {
+          document.getElementById('finalTimer').textContent = `⏱️ ${finalElapsedTime}`;
+          document.getElementById('finalTimer').style.display = 'block';
         }
+      }
+    }
 
-        function formatFinalTime(diff) {
-            const h = Math.floor(diff / 3600000);
-            const m = Math.floor((diff % 3600000) / 60000);
-            const s = Math.floor((diff % 60000) / 1000);
-            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    function renderMovies(data) {
+      const grid = document.getElementById('grid');
+      grid.innerHTML = '';
+
+      // Show preferences
+      document.getElementById('pref-genres').textContent = (data.preferences?.genres || []).join(', ') || 'N/A';
+      document.getElementById('pref-directors').textContent = (data.preferences?.directors || []).join(', ') || 'N/A';
+      const decades = (data.preferences?.decades || []).map(d => `${d}s`).join(', ') || 'N/A';
+      document.getElementById('pref-decades').textContent = decades;
+      document.getElementById('preferences-block').style.display = 'block';
+
+      // Get all unique platforms
+      const allPlatforms = new Set();
+      (data.recommendations || []).forEach(m => {
+        if (m.streaming) {
+          m.streaming.forEach(p => allPlatforms.add(p));
         }
+      });
 
-        function formatRuntime(minutes) {
-            if (!minutes || minutes === 0) return 'N/A';
-            const h = Math.floor(minutes / 60);
-            const m = minutes % 60;
-            return h > 0 ? `${h}h ${m}min` : `${m}min`;
+      // Create streaming filters
+      const filtersContainer = document.getElementById('streaming-filters');
+      filtersContainer.innerHTML = '';
+
+      if (allPlatforms.size > 0) {
+        Array.from(allPlatforms).sort().forEach(platform => {
+          const label = document.createElement('label');
+          label.className = 'checkbox-label';
+          label.innerHTML = `
+            <input type="checkbox" value="${platform}" onchange="filterMovies()">
+            <span>${platform}</span>
+          `;
+          filtersContainer.appendChild(label);
+        });
+      } else {
+        filtersContainer.innerHTML = '<span style="color: #888; font-size: 0.85rem;">No platforms available</span>';
+      }
+
+      // Render movies
+      (data.recommendations || []).forEach((m, i) => {
+        const card = document.createElement('div');
+        card.className = 'movie-card';
+        card.setAttribute('data-streaming', m.streaming ? m.streaming.join(',') : '');
+        card.setAttribute('data-rating', m.rating_tmdb ?? 0);
+        card.setAttribute('data-runtime', m.runtime || 0);
+        card.setAttribute('data-index', i);
+
+        const platformsHTML = m.streaming && m.streaming.length > 0
+          ? m.streaming.map(p => `<span class="platform">${p}</span>`).join('')
+          : '<div class="no-streaming">Not available on streaming</div>';
+
+        // Defensive fallbacks
+        const poster = m.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
+        const title = m.title || 'Untitled';
+        const year = m.year || '—';
+        const director = m.director || 'Unknown';
+        const runtimeText = formatRuntime(m.runtime);
+        const ratingText = (m.rating_tmdb !== undefined && m.rating_tmdb !== null) ? `${m.rating_tmdb}/10` : 'N/A';
+        const reason = m.reason || '';
+
+        card.innerHTML = `
+          <img src="${poster}" class="movie-poster" loading="lazy" alt="${title}">
+          <div class="movie-info">
+            <div class="movie-title">${title}</div>
+            <div class="movie-meta">${year} • ${director}</div>
+            <div class="movie-runtime">⏱️ ${runtimeText}</div>
+            <div class="movie-rating">⭐ ${ratingText}</div>
+            <div class="movie-reason">💡 ${reason}</div>
+            <div class="streaming">
+              <div class="streaming-title">Available in ${data.country_name || userCountry}:</div>
+              <div class="platforms">${platformsHTML}</div>
+            </div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+
+      // Save original order
+      originalOrder = Array.from(grid.children);
+
+      // Show results & controls
+      document.getElementById('results').style.display = 'block';
+      document.getElementById('controls-block').style.display = 'block';
+    }
+
+    function filterMovies() {
+      const checkboxes = document.querySelectorAll('#streaming-filters input[type="checkbox"]');
+      const selectedPlatforms = Array.from(checkboxes)
+        .filter(cb => cb.checked)
+        .map(cb => cb.value);
+
+      const movieCards = document.querySelectorAll('.movie-card');
+
+      movieCards.forEach(card => {
+        const cardPlatforms = card.getAttribute('data-streaming').split(',').filter(p => p);
+
+        if (selectedPlatforms.length === 0) {
+          card.style.display = 'flex';
+        } else {
+          const hasMatch = selectedPlatforms.some(platform => cardPlatforms.includes(platform));
+          card.style.display = hasMatch ? 'flex' : 'none';
         }
+      });
+    }
 
-        async function startProcess() {
-            const username = document.getElementById('username').value.trim();
-            if (!username) {
-                alert('Please enter a Letterboxd username');
-                return;
-            }
+    function sortMovies(type) {
+      const container = document.getElementById('grid');
+      const cards = Array.from(container.children);
 
-            // Reset UI
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('preferences-block').style.display = 'none';
-            document.getElementById('controls-block').style.display = 'none';
-            document.getElementById('finalTimer').style.display = 'none';
-            document.getElementById('btn').disabled = true;
-            document.getElementById('status-text').textContent = "Calculating library size...";
-            
-            startTime = new Date();
-            timerInterval = setInterval(updateTimer, 50);
+      // Remove active class from all buttons
+      document.querySelectorAll('.sort-button').forEach(btn => btn.classList.remove('active'));
 
-            try {
-                // Get number of pages for estimate
-                const pageRes = await fetch('http://localhost:5000/api/get_pages', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username})
-                });
-                const pageData = await pageRes.json();
-                
-                // Updated estimate: 40 seconds per page + overhead
-                const estSeconds = Math.round((pageData.pages * 40) + 15);
-                const estMinutes = Math.floor(estSeconds / 60);
-                const estSecs = estSeconds % 60;
-                document.getElementById('estimate-text').textContent = 
-                    `Estimated time: ~${estMinutes}m ${estSecs}s (Library of ${pageData.pages} pages)`;
-                document.getElementById('status-text').textContent = "Searching movies and streaming...";
+      let sortedCards;
 
-                // Main API call
-                const response = await fetch('http://localhost:5000/api/recommend', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username, country: userCountry})
-                });
-                
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error);
+      if (type === 'rating-desc') {
+        sortedCards = cards.sort((a, b) => parseFloat(b.getAttribute('data-rating')) - parseFloat(a.getAttribute('data-rating')));
+        document.getElementById('btn-rating-desc').classList.add('active');
+      } else if (type === 'rating-asc') {
+        sortedCards = cards.sort((a, b) => parseFloat(a.getAttribute('data-rating')) - parseFloat(b.getAttribute('data-rating')));
+        document.getElementById('btn-rating-asc').classList.add('active');
+      } else if (type === 'runtime-desc') {
+        sortedCards = cards.sort((a, b) => parseInt(b.getAttribute('data-runtime')) - parseInt(a.getAttribute('data-runtime')));
+        document.getElementById('btn-runtime-desc').classList.add('active');
+      } else if (type === 'runtime-asc') {
+        sortedCards = cards.sort((a, b) => parseInt(a.getAttribute('data-runtime')) - parseInt(b.getAttribute('data-runtime')));
+        document.getElementById('btn-runtime-asc').classList.add('active');
+      } else if (type === 'reset') {
+        sortedCards = originalOrder;
+        document.getElementById('btn-reset').classList.add('active');
+      } else {
+        sortedCards = cards; // fallback
+      }
 
-                // Calculate final time
-                const endTime = new Date();
-                const totalTime = endTime - startTime;
-                finalElapsedTime = formatFinalTime(totalTime);
-
-                renderMovies(data);
-
-            } catch (e) {
-                alert("Error: " + e.message);
-            } finally {
-                clearInterval(timerInterval);
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('btn').disabled = false;
-                
-                // Show final timer in top right corner
-                if (finalElapsedTime) {
-                    document.getElementById('finalTimer').textContent = `⏱️ ${finalElapsedTime}`;
-                    document.getElementById('finalTimer').style.display = 'block';
-                }
-            }
-        }
-
-        function renderMovies(data) {
-            const grid = document.getElementById('grid');
-            grid.innerHTML = '';
-            
-            // Show preferences
-            document.getElementById('pref-genres').textContent = data.preferences.genres.join(', ');
-            document.getElementById('pref-directors').textContent = data.preferences.directors.join(', ');
-            const decades = data.preferences.decades.map(d => `${d}s`).join(', ') || 'N/A';
-            document.getElementById('pref-decades').textContent = decades;
-            document.getElementById('preferences-block').style.display = 'block';
-            
-            // Get all unique platforms
-            const allPlatforms = new Set();
-            data.recommendations.forEach(m => {
-                if (m.streaming) {
-                    m.streaming.forEach(p => allPlatforms.add(p));
-                }
-            });
-            
-            // Create streaming filters
-            const filtersContainer = document.getElementById('streaming-filters');
-            filtersContainer.innerHTML = '';
-            
-            if (allPlatforms.size > 0) {
-                Array.from(allPlatforms).sort().forEach(platform => {
-                    const label = document.createElement('label');
-                    label.className = 'checkbox-label';
-                    label.innerHTML = `
-                        <input type="checkbox" value="${platform}" onchange="filterMovies()">
-                        <span>${platform}</span>
-                    `;
-                    filtersContainer.appendChild(label);
-                });
-            } else {
-                filtersContainer.innerHTML = '<span style="color: #888; font-size: 0.85rem;">No platforms available</span>';
-            }
-            
-            // Render movies
-            data.recommendations.forEach((m, i) => {
-                const card = document.createElement('div');
-                card.className = 'movie-card';
-                card.setAttribute('data-streaming', m.streaming ? m.streaming.join(',') : '');
-                card.setAttribute('data-rating', m.rating_tmdb);
-                card.setAttribute('data-runtime', m.runtime || 0);
-                card.setAttribute('data-index', i);
-                
-                const platformsHTML = m.streaming && m.streaming.length > 0
-                    ? m.streaming.map(p => `<span class="platform">${p}</span>`).join('')
-                    : '<div class="no-streaming">Not available on streaming</div>';
-                
-                card.innerHTML = `
-                    <img src="${m.poster || 'https://via.placeholder.com/200x300?text=No+Poster'}" class="movie-poster" loading="lazy">
-                    <div class="movie-info">
-                        <div class="movie-title">${m.title}</div>
-                        <div class="movie-meta">${m.year} • ${m.director}</div>
-                        <div class="movie-runtime">⏱️ ${formatRuntime(m.runtime)}</div>
-                        <div class="movie-rating">⭐ ${m.rating_tmdb}/10</div>
-                        <div class="movie-reason">💡 ${m.reason}</div>
-                        <div class="streaming">
-                            <div class="streaming-title">Available in ${data.country_name}:</div>
-                            <div class="platforms">${platformsHTML}</div>
-                        </div>
-                    </div>
-                `;
-                grid.appendChild(card);
-            });
-            
-            // Save original order
-            originalOrder = Array.from(grid.children);
-            
-            // Show results
-            document.getElementById('results').style.display = 'block';
-            document.getElementById('controls-block').style.display = 'block';
-        }
-
-        function filterMovies() {
-            const checkboxes = document.querySelectorAll('#streaming-filters input[type="checkbox"]');
-            const selectedPlatforms = Array.from(checkboxes)
-                .filter(cb => cb.checked)
-                .map(cb => cb.value);
-            
-            const movieCards = document.querySelectorAll('.movie-card');
-            
-            movieCards.forEach(card => {
-                const cardPlatforms = card.getAttribute('data-streaming').split(',').filter(p => p);
-                
-                if (selectedPlatforms.length === 0) {
-                    card.style.display = 'flex';
-                } else {
-                    const hasMatch = selectedPlatforms.some(platform => cardPlatforms.includes(platform));
-                    card.style.display = hasMatch ? 'flex' : 'none';
-                }
-            });
-        }
-
-        function sortMovies(type) {
-            const container = document.getElementById('grid');
-            const cards = Array.from(container.children);
-            
-            // Remove active class from all buttons
-            document.querySelectorAll('.sort-button').forEach(btn => btn.classList.remove('active'));
-            
-            let sortedCards;
-            
-            if (type === 'rating-desc') {
-                sortedCards = cards.sort((a, b) => parseFloat(b.getAttribute('data-rating')) - parseFloat(a.getAttribute('data-rating')));
-                document.getElementById('btn-rating-desc').classList.add('active');
-            } else if (type === 'rating-asc') {
-                sortedCards = cards.sort((a, b) => parseFloat(a.getAttribute('data-rating')) - parseFloat(b.getAttribute('data-rating')));
-                document.getElementById('btn-rating-asc').classList.add('active');
-            } else if (type === 'runtime-desc') {
-                sortedCards = cards.sort((a, b) => parseInt(b.getAttribute('data-runtime')) - parseInt(a.getAttribute('data-runtime')));
-                document.getElementById('btn-runtime-desc').classList.add('active');
-            } else if (type === 'runtime-asc') {
-                sortedCards = cards.sort((a, b) => parseInt(a.getAttribute('data-runtime')) - parseInt(b.getAttribute('data-runtime')));
-                document.getElementById('btn-runtime-asc').classList.add('active');
-            } else if (type === 'reset') {
-                sortedCards = originalOrder;
-                document.getElementById('btn-reset').classList.add('active');
-            }
-            
-            container.innerHTML = '';
-            sortedCards.forEach(card => container.appendChild(card));
-        }
-    </script>
+      container.innerHTML = '';
+      sortedCards.forEach(card => container.appendChild(card));
+    }
+  </script>
 </body>
 </html>
