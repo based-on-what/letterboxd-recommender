@@ -11,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from functools import wraps
 from dotenv import load_dotenv
+import unicodedata
+import re
 
 load_dotenv()
 
@@ -151,6 +153,20 @@ session = make_session()
 tmdb_limiter = RateLimiter(min_interval=0.25)
 letterboxd_limiter = RateLimiter(min_interval=0.35)
 streaming_limiter = RateLimiter(min_interval=0.3)
+
+def normalize_title(t):
+    """Devuelve título normalizado: sin acentos, sin puntuación, minúsculas, espacios reducidos."""
+    if not t:
+        return ""
+    # NFKD para separar diacríticos
+    t = unicodedata.normalize('NFKD', t)
+    t = ''.join([c for c in t if not unicodedata.combining(c)])
+    t = t.lower()
+    # eliminar cualquier caracter no alfanumérico (dejamos espacios)
+    t = re.sub(r'[^a-z0-9\s]', ' ', t)
+    # normalizar espacios
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
 
 class MovieRecommender:
     def __init__(self, country='CL', max_workers=8):
@@ -315,9 +331,13 @@ class MovieRecommender:
             poster_path = det.get('poster_path')
             poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
 
+            # incluir original_title si existe para mejorar matching
+            original_title = det.get('original_title')
+
             out = {
                 'tmdb_id': movie_id,
                 'title': det.get('title') or title,
+                'original_title': original_title,
                 'year': (det.get('release_date') or '')[:4] or None,
                 'director': director,
                 'genres': [g['name'] for g in det.get('genres', [])] if det.get('genres') else [],
@@ -358,9 +378,12 @@ class MovieRecommender:
             poster_path = det.get('poster_path')
             poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
 
+            original_title = det.get('original_title')
+
             out = {
                 'tmdb_id': movie_id,
                 'title': det.get('title'),
+                'original_title': original_title,
                 'year': (det.get('release_date') or '')[:4] or None,
                 'director': director,
                 'genres': [g['name'] for g in det.get('genres', [])] if det.get('genres') else [],
@@ -403,27 +426,37 @@ class MovieRecommender:
 
     def get_recommendations(self, enriched_films, count=DEFAULT_LIMIT_RECS, force_refresh=False):
         """
-        Ahora excluimos por tmdb_id (primario) y por título (fallback).
-        Para obtener similares usamos /movie/{id}/similar y pedimos detalles por id cuando sea posible.
+        Excluir por tmdb_id (primario) y por título normalizado (fallback).
+        Se asume que `enriched_films` contiene una entrada por cada film scrapeado
+        (incluso si no se encontró en TMDb, entonces tmdb_id=None pero title existe).
         También filtramos por rating mínimo configurado en MIN_RECOMMEND_RATING.
         """
         # Build sets of seen identifiers from the user's enriched films
         seen_ids = set()
-        seen_titles = set()
+        seen_titles_norm = set()
         for f in enriched_films:
+            # tmdb_id si existe
             if f.get('tmdb_id'):
                 try:
                     seen_ids.add(int(f['tmdb_id']))
                 except Exception:
-                    # keep it as str fallback
                     seen_ids.add(f['tmdb_id'])
-            if f.get('title'):
-                seen_titles.add(f['title'].lower())
+            # Siempre añadimos título normalizado (incluso si no hay tmdb_id)
+            title = f.get('title') or ''
+            seen_titles_norm.add(normalize_title(title))
+            # si tenemos original_title también la agregamos
+            if f.get('original_title'):
+                seen_titles_norm.add(normalize_title(f.get('original_title')))
 
         recs = []
+        # top_films: seleccionar las películas mejor valoradas por el usuario (pero si no tienen tmdb_id igualmente podemos intentar)
         top_films = sorted(enriched_films, key=lambda x: x.get('user_rating', 0), reverse=True)[:10]
 
         def process_similar(film):
+            # si la película no tiene tmdb_id, no podemos pedir /similar; devolvemos []
+            if not film.get('tmdb_id'):
+                return []
+
             cache_key = f"similar:{film.get('tmdb_id')}"
             if not force_refresh:
                 cached = cache.get('similar', cache_key)
@@ -437,7 +470,7 @@ class MovieRecommender:
                 cache.set('similar', cache_key, [], ttl=60 * 60 * 24)
                 return []
             try:
-                results = resp.json().get('results', [])[:8]
+                results = resp.json().get('results', [])[:12]
                 for m in results:
                     title = m.get('title')
                     mid = m.get('id')
@@ -446,8 +479,8 @@ class MovieRecommender:
                     # Exclude if TMDb id is one we've already seen
                     if mid and (mid in seen_ids or str(mid) in seen_ids):
                         continue
-                    # Exclude by title fallback
-                    if title.lower() in seen_titles:
+                    # Exclude by title fallback (normalized)
+                    if normalize_title(title) in seen_titles_norm:
                         continue
                     # Get details: prefer lookup by id
                     det = None
@@ -457,6 +490,17 @@ class MovieRecommender:
                         # fallback to search-by-title (less reliable)
                         det = self.get_tmdb_details(title, force_refresh=force_refresh)
                     if det:
+                        # doble comprobación defensiva: si la película encontrada coincide con algún seen_id OR titulo normalizado, descartarla
+                        try:
+                            det_id_key = int(det.get('tmdb_id')) if det.get('tmdb_id') else None
+                        except Exception:
+                            det_id_key = det.get('tmdb_id')
+                        if det_id_key and (det_id_key in seen_ids or str(det_id_key) in seen_ids):
+                            continue
+                        if normalize_title(det.get('title') or '') in seen_titles_norm:
+                            continue
+                        if det.get('original_title') and normalize_title(det.get('original_title')) in seen_titles_norm:
+                            continue
                         det['reason'] = f"Since you liked {film.get('title')}"
                         local.append(det)
                 cache.set('similar', cache_key, local, ttl=60 * 60 * 24)
@@ -465,7 +509,7 @@ class MovieRecommender:
             return local
 
         with ThreadPoolExecutor(max_workers=min(6, self.max_workers)) as ex:
-            futures = [ex.submit(process_similar, f) for f in top_films if f.get('tmdb_id')]
+            futures = [ex.submit(process_similar, f) for f in top_films]
             for f in as_completed(futures):
                 try:
                     recs.extend(f.result())
@@ -483,6 +527,9 @@ class MovieRecommender:
                 if key not in unique:
                     # don't return movies the user already saw (defense - check again)
                     if key in seen_ids or str(key) in seen_ids:
+                        continue
+                    # also check normalized title as final defense
+                    if normalize_title(r.get('title') or '') in seen_titles_norm:
                         continue
                     unique[key] = r
 
@@ -574,11 +621,25 @@ def recommend():
         # Enrich (parallel, capped)
         enriched = []
         def enrich_task(f):
+            # Intentamos resolver contra TMDb; si falla, devolvemos un objeto mínimo con 'title' y user_rating
             d = rec_sys.get_tmdb_details(f['title'], force_refresh=force_refresh)
             if d:
                 d['user_rating'] = f.get('rating', 0)
                 return d
-            return None
+            else:
+                # fallback: mantener registro del título original, sin tmdb_id
+                return {
+                    'tmdb_id': None,
+                    'title': f.get('title'),
+                    'original_title': None,
+                    'year': None,
+                    'director': None,
+                    'genres': [],
+                    'poster': None,
+                    'rating_tmdb': None,
+                    'runtime': 0,
+                    'user_rating': f.get('rating', 0)
+                }
 
         with ThreadPoolExecutor(max_workers=min(8, rec_sys.max_workers)) as ex:
             futures = [ex.submit(enrich_task, f) for f in user_films[:max_films]]
