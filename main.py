@@ -13,6 +13,9 @@ from functools import wraps
 from dotenv import load_dotenv
 load_dotenv()
 
+print("DEBUG: main import start", flush=True)
+
+
 # Caching options
 try:
     import redis
@@ -30,6 +33,7 @@ logger = logging.getLogger("letterboxd-recommender")
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
+print("DEBUG: Flask app created", flush=True)
 
 # Configurable defaults via env vars
 TMDB_KEY = os.getenv("TMDB_KEY")
@@ -455,20 +459,18 @@ class MovieRecommender:
 
 # Flask routes
 
-# Health check rápido para PaaS
+# --- DEBUG / HEALTH ROUTES (temporary, remove when fixed) ---
 @app.route('/_health', methods=['GET'])
 def health():
+    print("DEBUG: /_health called", flush=True)
     return jsonify({"status": "ok"}), 200
 
-# Root robusto: sirve index.html si existe, si no responde un JSON simple
-@app.route('/')
-def root():
-    if os.path.exists(os.path.join(os.path.dirname(__file__), 'index.html')):
-        try:
-            return app.send_static_file('index.html')
-        except Exception:
-            return jsonify({"status": "ok"}), 200
+@app.route('/', methods=['GET'])
+def root_quick():
+    # Respuesta inmediata y simple para que el PaaS reciba 200 OK
+    print("DEBUG: / (root) called", flush=True)
     return jsonify({"status": "ok"}), 200
+# --------------------------------------------------------------
 
 @app.route('/api/get_pages', methods=['POST'])
 def get_pages():
@@ -566,6 +568,11 @@ def recommend():
     except Exception:
         logger.exception("recommend endpoint failed")
         return jsonify({'error': 'internal server error'}), 500
+
+import atexit
+@atexit.register
+def on_exit():
+    print("DEBUG: worker exiting", flush=True)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
