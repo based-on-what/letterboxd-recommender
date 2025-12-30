@@ -37,6 +37,30 @@
       z-index: 1000;
     }
 
+    /* Export button top left corner */
+    .export-button {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 224, 84, 0.95);
+      color: #000;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: bold;
+      font-family: monospace;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      display: none;
+      z-index: 1000;
+      cursor: pointer;
+      border: none;
+      transition: all 0.18s;
+    }
+    .export-button:hover {
+      background: rgba(0, 255, 94, 1);
+      transform: translateY(-2px);
+    }
+
     /* Input section */
     .input-section {
       background: #1e1e1e;
@@ -103,7 +127,6 @@
       font-family: monospace;
       margin: 10px 0;
     }
-    .estimate { font-size: 0.9rem; color: #888; }
 
     /* Preferences block */
     .preferences {
@@ -139,11 +162,11 @@
     .controls-title { font-size: 1rem; color: #00e054; font-weight: bold; margin-bottom: 0.8rem; }
     .filter-group { display:flex; flex-wrap:wrap; gap:12px; align-items: center; justify-content: flex-start;}
     .checkbox-label {
-        display: inline-flex;        /* importante: inline para que no rompa el flujo y no se estire */
+        display: inline-flex;
         align-items: center;
-        gap: 8px;                    /* espacio entre checkbox y texto */
-        white-space: nowrap;         /* evita salto de línea dentro del label */
-        padding: 6px 10px;          /* ajuste de padding a tu gusto */
+        gap: 8px;
+        white-space: nowrap;
+        padding: 6px 10px;
         font-size: 0.85rem;
         color: #e0e0e0;
         background: rgba(255,255,255,0.03);
@@ -151,21 +174,17 @@
         border: 1px solid #333;
         transition: all 0.18s;
         cursor: pointer;
-
-        /* clave para que no crezcan ni se encojan */
         flex: 0 0 auto;
         width: auto;
         max-width: none;
         }
 
-        /* asegúrate que el input no intente forzar ancho */
         .checkbox-label input[type="checkbox"] {
         width: auto;
-        margin: 0; /* controla el espacio con gap en el label */
-        transform: scale(1); /* si quieres reducir el checkbox, ajusta aquí */
+        margin: 0;
+        transform: scale(1);
         }
 
-        /* hover opcional */
         .checkbox-label:hover {
         background: rgba(0, 224, 84, 0.06);
         border-color: #00e054;
@@ -284,6 +303,7 @@
       .movies-grid { gap: 14px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
       .movie-card { min-height: 300px; }
       .final-timer { font-size: 0.95rem; padding: 10px 16px; top: 12px; right: 12px; }
+      .export-button { font-size: 0.85rem; padding: 10px 16px; top: 12px; left: 12px; }
     }
     @media (max-width: 600px) {
       body { padding: 12px; }
@@ -299,11 +319,18 @@
         font-size: 0.85rem;
         padding: 8px 12px;
       }
+      .export-button {
+        top: 10px;
+        left: 10px;
+        font-size: 0.75rem;
+        padding: 8px 12px;
+      }
     }
   </style>
 </head>
 <body>
 
+  <button class="export-button" id="exportBtn" onclick="exportToExcel()">📊 Export to Excel</button>
   <div class="final-timer" id="finalTimer"></div>
 
   <div class="container">
@@ -326,7 +353,6 @@
       <div id="loading" class="loading-box">
         <div class="timer" id="chronometer">00:00.00</div>
         <div id="status-text">Analyzing profile...</div>
-        <div class="estimate" id="estimate-text"></div>
       </div>
     </div>
 
@@ -371,12 +397,14 @@
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script>
     let startTime;
     let timerInterval;
     let userCountry = 'CL';
     let originalOrder = [];
     let finalElapsedTime = '';
+    let moviesData = [];
     const API_BASE = window.location.origin + '/api';
 
     // Detect country by IP on load
@@ -385,9 +413,9 @@
         const res = await fetch('https://ipapi.co/json/');
         const data = await res.json();
         userCountry = data.country_code || 'CL';
-        document.getElementById('user-location').textContent = `📍 Searching availability in: ${data.country_name}`;
+        document.getElementById('user-location').textContent = `🌍 Searching availability in: ${data.country_name}`;
       } catch (e) {
-        document.getElementById('user-location').textContent = `📍 Location: unknown`;
+        document.getElementById('user-location').textContent = `🌍 Location: unknown`;
       }
     };
 
@@ -415,6 +443,32 @@
       return h > 0 ? `${h}h ${m}min` : `${m}min`;
     }
 
+    function exportToExcel() {
+      if (moviesData.length === 0) {
+        alert('No data to export');
+        return;
+      }
+
+      const exportData = moviesData.map(movie => ({
+        'Title': movie.title || '',
+        'Year': movie.year || '',
+        'Director': movie.director || '',
+        'Runtime': formatRuntime(movie.runtime),
+        'Rating (TMDb)': movie.rating_tmdb !== undefined && movie.rating_tmdb !== null ? `${movie.rating_tmdb}/10` : 'N/A',
+        'Genres': (movie.genres || []).join(', '),
+        'Reason': movie.reason || '',
+        'Streaming Platforms': (movie.streaming || []).join(', '),
+        'Poster URL': movie.poster || ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Recommendations');
+      
+      const username = document.getElementById('username').value.trim() || 'user';
+      XLSX.writeFile(wb, `letterboxd_recommendations_${username}.xlsx`);
+    }
+
     async function startProcess() {
       const username = document.getElementById('username').value.trim();
       if (!username) {
@@ -428,29 +482,14 @@
       document.getElementById('preferences-block').style.display = 'none';
       document.getElementById('controls-block').style.display = 'none';
       document.getElementById('finalTimer').style.display = 'none';
+      document.getElementById('exportBtn').style.display = 'none';
       document.getElementById('btn').disabled = true;
-      document.getElementById('status-text').textContent = "Calculating library size...";
+      document.getElementById('status-text').textContent = "Analyzing profile...";
 
       startTime = new Date();
       timerInterval = setInterval(updateTimer, 50);
 
       try {
-        // Get number of pages for estimate
-        const pageRes = await fetch(`${API_BASE}/get_pages`, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({username})
-        });
-        const pageData = await pageRes.json();
-
-        // Updated estimate: 55 seconds per page + overhead
-        const estSeconds = Math.round((pageData.pages * 55) + 15);
-        const estMinutes = Math.floor(estSeconds / 60);
-        const estSecs = estSeconds % 60;
-        document.getElementById('estimate-text').textContent =
-          `Estimated time: ~${estMinutes}m ${estSecs}s (Library of ${pageData.pages} pages)`;
-        document.getElementById('status-text').textContent = "Searching movies and streaming...";
-
         // Main API call
         const response = await fetch(`${API_BASE}/recommend`, {
           method: 'POST',
@@ -486,6 +525,9 @@
     function renderMovies(data) {
       const grid = document.getElementById('grid');
       grid.innerHTML = '';
+
+      // Store movies data for export
+      moviesData = data.recommendations || [];
 
       // Show preferences
       document.getElementById('pref-genres').textContent = (data.preferences?.genres || []).join(', ') || 'N/A';
@@ -562,9 +604,10 @@
       // Save original order
       originalOrder = Array.from(grid.children);
 
-      // Show results & controls
+      // Show results, controls & export button
       document.getElementById('results').style.display = 'block';
       document.getElementById('controls-block').style.display = 'block';
+      document.getElementById('exportBtn').style.display = 'block';
     }
 
     function filterMovies() {
@@ -612,7 +655,7 @@
         sortedCards = originalOrder;
         document.getElementById('btn-reset').classList.add('active');
       } else {
-        sortedCards = cards; // fallback
+        sortedCards = cards;
       }
 
       container.innerHTML = '';
