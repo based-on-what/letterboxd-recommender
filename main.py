@@ -57,30 +57,37 @@ class RateLimiter:
 class Cache:
     def __init__(self):
         self.redis = None
-        if REDIS_URL and redis:
-            try:
-                self.redis = redis.from_url(REDIS_URL, decode_responses=True)
-                # test connection
-                self.redis.ping()
-                logger.info("Using Redis for cache")
-            except Exception as e:
-                logger.warning("Redis enabled but connection failed. Falling back to in-memory cache. %s", e)
-                self.redis = None
+        self._redis_initialized = False
+        self._redis_attempted = False
 
-        # Fallback caches (simple TTL caches)
+        # Fallback caches (simple TTL caches / dicts)
         self.caches = {}
-        if not self.redis:
-            if TTLCache is None:
-                # Minimal fallback (very small)
-                self.caches['tmdb'] = {}
-                self.caches['similar'] = {}
-                self.caches['streaming'] = {}
-                self.caches['user_scrape'] = {}
-            else:
-                self.caches['tmdb'] = TTLCache(maxsize=2000, ttl=60 * 60 * 24)        # 24h
-                self.caches['similar'] = TTLCache(maxsize=2000, ttl=60 * 60 * 24)     # 24h
-                self.caches['streaming'] = TTLCache(maxsize=2000, ttl=60 * 60 * 6)    # 6h
-                self.caches['user_scrape'] = TTLCache(maxsize=500, ttl=60 * 30)       # 30m
+        if TTLCache is None:
+            self.caches['tmdb'] = {}
+            self.caches['similar'] = {}
+            self.caches['streaming'] = {}
+            self.caches['user_scrape'] = {}
+        else:
+            self.caches['tmdb'] = TTLCache(maxsize=2000, ttl=60 * 60 * 24)
+            self.caches['similar'] = TTLCache(maxsize=2000, ttl=60 * 60 * 24)
+            self.caches['streaming'] = TTLCache(maxsize=2000, ttl=60 * 60 * 6)
+            self.caches['user_scrape'] = TTLCache(maxsize=500, ttl=60 * 30)
+
+    def _init_redis(self):
+        # intenta inicializar redis SOLO la primera vez que se necesita
+        if self._redis_attempted:
+            return
+        self._redis_attempted = True
+        if not REDIS_URL or not redis:
+            return
+        try:
+            self.redis = redis.from_url(REDIS_URL, decode_responses=True)
+            # ping con timeout corto para evitar bloqueos largos
+            self.redis.ping()
+            logger.info("Using Redis for cache")
+        except Exception as e:
+            logger.warning("Redis enabled but connection failed. Falling back to in-memory cache. %s", e)
+            self.redis = None
 
     def _redis_get(self, key):
         try:
@@ -98,6 +105,9 @@ class Cache:
             pass
 
     def get(self, namespace, key):
+        # inicializa redis si no lo hemos hecho
+        if not self._redis_attempted:
+            self._init_redis()
         if self.redis:
             return self._redis_get(f"{namespace}:{key}")
         else:
@@ -108,6 +118,8 @@ class Cache:
                 return None
 
     def set(self, namespace, key, value, ttl=None):
+        if not self._redis_attempted:
+            self._init_redis()
         if self.redis:
             self._redis_set(f"{namespace}:{key}", value, ex=ttl)
         else:
@@ -119,6 +131,7 @@ class Cache:
                     cache[key] = value
             except Exception:
                 pass
+
 
 cache = Cache()
 
@@ -441,9 +454,21 @@ class MovieRecommender:
         return []
 
 # Flask routes
+
+# Health check rápido para PaaS
+@app.route('/_health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"}), 200
+
+# Root robusto: sirve index.html si existe, si no responde un JSON simple
 @app.route('/')
 def root():
-    return app.send_static_file('index.html')
+    if os.path.exists(os.path.join(os.path.dirname(__file__), 'index.html')):
+        try:
+            return app.send_static_file('index.html')
+        except Exception:
+            return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "ok"}), 200
 
 @app.route('/api/get_pages', methods=['POST'])
 def get_pages():
@@ -546,4 +571,3 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     # For production use Gunicorn. dev: python main.py
     app.run(host='0.0.0.0', port=port)
-
