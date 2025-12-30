@@ -544,5 +544,5 @@ def recommend():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    # For production use Gunicorn. dev: python backend.py
+    # For production use Gunicorn. dev: python main.py
     app.run(host='0.0.0.0', port=port)
