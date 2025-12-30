@@ -27,6 +27,8 @@ REDIS_URL = os.getenv("REDIS_URL")  # optional
 MAX_SCRAPE_PAGES = int(os.getenv("MAX_SCRAPE_PAGES") or 50)
 DEFAULT_MAX_FILMS = int(os.getenv("DEFAULT_MAX_FILMS") or 30)
 DEFAULT_LIMIT_RECS = int(os.getenv("DEFAULT_LIMIT_RECS") or 60)
+# Nuevo: umbral mínimo de rating para que una recomendación sea válida
+MIN_RECOMMEND_RATING = float(os.getenv("MIN_RECOMMEND_RATING", "7.0"))
 
 # Simple RateLimiter (per-service)
 class RateLimiter:
@@ -403,6 +405,7 @@ class MovieRecommender:
         """
         Ahora excluimos por tmdb_id (primario) y por título (fallback).
         Para obtener similares usamos /movie/{id}/similar y pedimos detalles por id cuando sea posible.
+        También filtramos por rating mínimo configurado en MIN_RECOMMEND_RATING.
         """
         # Build sets of seen identifiers from the user's enriched films
         seen_ids = set()
@@ -482,7 +485,20 @@ class MovieRecommender:
                     if key in seen_ids or str(key) in seen_ids:
                         continue
                     unique[key] = r
-        out = list(unique.values())[:count]
+
+        # Nuevo: filtrar por rating mínimo (MIN_RECOMMEND_RATING).
+        # Excluimos cualquier película sin rating_tmdb o con rating < umbral.
+        filtered = []
+        for v in unique.values():
+            rating = v.get('rating_tmdb')
+            try:
+                if rating is not None and float(rating) >= MIN_RECOMMEND_RATING:
+                    filtered.append(v)
+            except Exception:
+                # si por alguna razón no puede parsear, lo descartamos
+                continue
+
+        out = filtered[:count]
         return out
 
     def get_streaming(self, title, year=None, force_refresh=False):
@@ -613,7 +629,8 @@ def recommend():
             'country_name': rec_sys.get_country_name(),
             'pages': pages,
             'preferences': preferences,
-            'recommendations': minimal_recs
+            'recommendations': minimal_recs,
+            'min_rating_filter': MIN_RECOMMEND_RATING
         })
     except Exception:
         logger.exception("recommend endpoint failed")
