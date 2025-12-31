@@ -13,8 +13,9 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      height: 100vh;
+      min-height: 100vh;
       margin: 0;
+      padding: 20px;
     }
     .input-section {
       background: #1e1e1e;
@@ -23,6 +24,8 @@
       border: 1px solid #333;
       text-align: center;
       box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      max-width: 500px;
+      width: 100%;
     }
     h1 {
       font-size: 2.2rem;
@@ -60,13 +63,37 @@
     .loading-box { display: none; margin-top: 25px; }
     .timer { font-size: 1.5rem; color: #ffbd00; font-weight: bold; margin-bottom: 10px;}
     .status { color: #888; font-size: 0.9rem; }
+    
+    .go-button {
+      display: none;
+      padding: 18px 36px;
+      background: linear-gradient(135deg, #00e054 0%, #00c853 100%);
+      color: #000;
+      border: none;
+      border-radius: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      font-family: inherit;
+      margin-top: 25px;
+      font-size: 1.1rem;
+      transition: all 0.3s;
+      box-shadow: 0 5px 20px rgba(0, 224, 84, 0.3);
+    }
+    .go-button:hover {
+      background: linear-gradient(135deg, #00ff5e 0%, #00e054 100%);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(0, 224, 84, 0.5);
+    }
   </style>
 </head>
 <body>
   <div class="input-section">
     <h1>🎬 Letterboxd Recommender</h1>
-    <div style="color: #888; margin-bottom: 20px; font-size: 0.9rem;">
-      Enter your username to generate a permanent link.
+    <div style="color: #888; margin-bottom: 10px; font-size: 0.9rem;">
+      Enter your username to generate recommendations.
+    </div>
+    <div id="countryDisplay" style="color: #00e054; margin-bottom: 20px; font-size: 0.85rem;">
+      📍 Detecting location...
     </div>
     
     <input type="text" id="username" placeholder="Username (e.g. davidehrlich)" onkeypress="if(event.key==='Enter')startProcess()">
@@ -76,14 +103,31 @@
     <div id="loading" class="loading-box">
       <div class="timer" id="chronometer">00:00.00</div>
       <div class="status">Analyzing profile & fetching data...</div>
-      <div class="status" style="font-size: 0.8rem; margin-top: 5px; color: #555;">(A new tab will open when finished)</div>
     </div>
+
+    <button id="goButton" class="go-button" onclick="goToRecommendations()">
+      Go to <span id="usernameDisplay"></span> recommendations →
+    </button>
   </div>
 
   <script>
     let startTime;
     let timerInterval;
     let userCountry = 'CL';
+    let currentUsername = '';
+    let countryName = 'Chile';
+
+    // Country names mapping
+    const countryNames = {
+      'CL': 'Chile', 'AR': 'Argentina', 'MX': 'Mexico', 'US': 'United States',
+      'ES': 'Spain', 'BR': 'Brazil', 'CO': 'Colombia', 'PE': 'Peru', 'UY': 'Uruguay',
+      'IT': 'Italy', 'FR': 'France', 'DE': 'Germany', 'GB': 'United Kingdom',
+      'CA': 'Canada', 'AU': 'Australia', 'NZ': 'New Zealand', 'JP': 'Japan',
+      'KR': 'South Korea', 'IN': 'India', 'CN': 'China', 'NL': 'Netherlands',
+      'SE': 'Sweden', 'NO': 'Norway', 'DK': 'Denmark', 'FI': 'Finland',
+      'PT': 'Portugal', 'IE': 'Ireland', 'BE': 'Belgium', 'AT': 'Austria',
+      'CH': 'Switzerland', 'PL': 'Poland', 'CZ': 'Czech Republic', 'GR': 'Greece'
+    };
 
     // Detect country automatically
     window.onload = async () => {
@@ -91,7 +135,11 @@
         const res = await fetch('https://ipapi.co/json/');
         const data = await res.json();
         userCountry = data.country_code || 'CL';
-      } catch (e) {}
+        countryName = countryNames[userCountry] || data.country_name || userCountry;
+        document.getElementById('countryDisplay').textContent = `📍 Streaming availability for: ${countryName}`;
+      } catch (e) {
+        document.getElementById('countryDisplay').textContent = `📍 Streaming availability for: ${countryName}`;
+      }
     };
 
     function updateTimer() {
@@ -107,9 +155,12 @@
       const username = document.getElementById('username').value.trim();
       if (!username) return alert('Please enter a username');
 
+      currentUsername = username;
+
       // UI changes
       document.getElementById('btn').disabled = true;
       document.getElementById('loading').style.display = 'block';
+      document.getElementById('goButton').style.display = 'none';
       
       startTime = new Date();
       timerInterval = setInterval(updateTimer, 50);
@@ -125,37 +176,35 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Unknown error');
 
+        clearInterval(timerInterval);
         const endTime = new Date();
         const totalTime = endTime - startTime;
 
         // Save data to localStorage to transfer to new tab instantly without re-fetching
-        // We use a specific key for this user
         const cacheKey = `lb_data_${username}`;
         localStorage.setItem(cacheKey, JSON.stringify({
           data: data,
           timestamp: new Date().getTime(),
-          executionTime: totalTime // Save the timer result
+          executionTime: totalTime
         }));
 
-        // Open the new route in a new tab
-        // We append a timestamp to force reload if needed, but mainly we rely on path
-        const newTab = window.open(`/${username}`, '_blank');
-        
-        // Check if popup blocker blocked it
-        if (!newTab) {
-          alert('Please allow popups for this site to see your recommendations page.');
-        } else {
-            // Reset this page
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('btn').disabled = false;
-            document.getElementById('username').value = '';
-        }
+        // Show the "Go to recommendations" button
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('btn').disabled = false;
+        document.getElementById('goButton').style.display = 'block';
+        document.getElementById('usernameDisplay').textContent = username;
 
       } catch (e) {
         clearInterval(timerInterval);
         document.getElementById('btn').disabled = false;
         document.getElementById('loading').style.display = 'none';
         alert("Error: " + e.message);
+      }
+    }
+
+    function goToRecommendations() {
+      if (currentUsername) {
+        window.location.href = `/${currentUsername}`;
       }
     }
   </script>
