@@ -3,192 +3,342 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Results</title>
+  <title>Recommendations</title>
   <style>
-    /* Base CSS imported from your previous version */
-    body { background-color: #121212; color: #e0e0e0; font-family: 'Consolas', 'Monaco', monospace; padding: 20px; line-height: 1.6; }
-    .container { max-width: 1200px; margin: 0 auto; position: relative; }
-    
-    /* Top Buttons */
-    .final-timer { position: fixed; top: 20px; right: 20px; background: #ffbd00; color: #000; padding: 10px 20px; border-radius: 8px; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 100; font-family: monospace;}
-    .export-button { position: fixed; top: 20px; left: 20px; background: #00e054; color: #000; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; border: none; z-index: 100; transition: transform 0.2s; font-family: monospace;}
-    .export-button:hover { transform: translateY(-2px); background: #00ff5e; }
-    
-    /* Header */
-    .header-info { text-align: center; margin: 60px 0 40px; }
-    h1 { color: #00e054; margin: 0; font-size: 2.5rem; text-shadow: 0 0 20px rgba(0, 224, 84, 0.2); }
-    .sub-info { color: #888; margin-top: 10px; }
-
-    /* Preferences */
-    .preferences { background: #1e1e1e; padding: 20px; border-radius: 12px; border: 1px solid #333; margin-bottom: 30px; }
-    .pref-row { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 20px; }
-    .pref-item strong { color: #00e054; display: block; margin-bottom: 5px; font-size: 0.9rem; }
-    
-    /* Grid */
-    .movies-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; }
-    .movie-card { background: #1e1e1e; border-radius: 10px; overflow: hidden; border: 1px solid #333; display: flex; flex-direction: column; transition: transform 0.2s; }
-    .movie-card:hover { transform: translateY(-5px); border-color: #00e054; }
-    .movie-poster { width: 100%; aspect-ratio: 2/3; object-fit: cover; }
-    .movie-info { padding: 15px; flex-grow: 1; display: flex; flex-direction: column; gap: 5px; }
-    .title { font-weight: bold; color: #fff; margin-bottom: 5px; }
-    .meta { font-size: 0.8rem; color: #aaa; }
-    .rating { color: #ffbd00; font-weight: bold; margin: 5px 0; }
-    .reason { font-size: 0.8rem; font-style: italic; color: #888; background: rgba(255,255,255,0.05); padding: 5px; border-radius: 4px; margin-top: 5px; }
-    .streaming-sec { margin-top: auto; padding-top: 10px; border-top: 1px dashed #333; }
-    .platform { display: inline-block; background: #00e054; color: #000; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; margin: 2px; font-weight: bold; }
-    
-    .loading-overlay { position: fixed; inset: 0; background: #121212; display: flex; align-items: center; justify-content: center; z-index: 50; flex-direction: column;}
-    .spinner { color: #00e054; font-size: 2rem; margin-bottom: 20px; font-family: monospace;}
-    
-    @media (max-width: 600px) {
-        .header-info { margin-top: 80px; }
-        .movies-grid { grid-template-columns: repeat(2, 1fr); }
+    * { box-sizing: border-box; }
+    body {
+      background-color: #121212;
+      color: #e0e0e0;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    h1 {
+      font-size: 2.5rem;
+      color: #00e054;
+      text-shadow: 0 0 15px rgba(0, 224, 84, 0.4);
+      margin-bottom: 10px;
+    }
+    .username {
+      font-size: 1.3rem;
+      color: #ffbd00;
+      margin-bottom: 20px;
+    }
+    .info-box {
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid #333;
+      margin-bottom: 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+    .timer-display {
+      font-size: 1.2rem;
+      color: #ffbd00;
+      font-weight: bold;
+    }
+    .export-btn {
+      padding: 12px 24px;
+      background: #00e054;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.95rem;
+      transition: all 0.2s;
+    }
+    .export-btn:hover {
+      background: #00ff5e;
+      transform: scale(1.05);
+    }
+    .preferences {
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid #333;
+      margin-bottom: 30px;
+    }
+    .preferences h2 {
+      color: #00e054;
+      margin-top: 0;
+    }
+    .pref-section {
+      margin-bottom: 15px;
+    }
+    .pref-label {
+      color: #888;
+      font-size: 0.9rem;
+      margin-bottom: 5px;
+    }
+    .pref-value {
+      color: #fff;
+      font-size: 1rem;
+    }
+    .recommendations {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .movie-card {
+      background: #1e1e1e;
+      border: 1px solid #333;
+      border-radius: 12px;
+      overflow: hidden;
+      transition: all 0.3s;
+      cursor: pointer;
+    }
+    .movie-card:hover {
+      border-color: #00e054;
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(0, 224, 84, 0.2);
+    }
+    .movie-poster {
+      width: 100%;
+      height: 400px;
+      object-fit: cover;
+      background: #2a2a2a;
+    }
+    .movie-info {
+      padding: 15px;
+    }
+    .movie-title {
+      font-size: 1.1rem;
+      font-weight: bold;
+      color: #fff;
+      margin-bottom: 5px;
+    }
+    .movie-meta {
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    .movie-reason {
+      font-size: 0.8rem;
+      color: #00e054;
+      font-style: italic;
+      margin-bottom: 10px;
+    }
+    .streaming {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 10px;
+    }
+    .streaming-badge {
+      background: #333;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+    }
+    .loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: #888;
+      font-size: 1.2rem;
+    }
+    .error {
+      text-align: center;
+      padding: 60px 20px;
+      color: #ff5555;
+      font-size: 1.2rem;
+    }
+    .back-btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background: #333;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      transition: all 0.2s;
+    }
+    .back-btn:hover {
+      background: #444;
     }
   </style>
 </head>
 <body>
-
-  <div id="loader" class="loading-overlay">
-    <div class="spinner">Loading data...</div>
-    <div style="color: #888;">Fetching latest recommendations</div>
-  </div>
-
-  <button class="export-button" onclick="exportToExcel()">📊 Export to Excel</button>
-  <div class="final-timer" id="timerDisplay">--:--</div>
-
   <div class="container">
-    <div class="header-info">
-        <h1 id="pageTitle">Recommendations</h1>
-        <div class="sub-info" id="pageSub">Detected Country: --</div>
+    <a href="/" class="back-btn">← Back to Home</a>
+    
+    <div class="header">
+      <h1>🎬 Movie Recommendations</h1>
+      <div class="username" id="usernameDisplay"></div>
     </div>
 
-    <div class="preferences">
-        <div class="pref-row">
-            <div class="pref-item"><strong>❤️ Favorite Genres</strong><span id="p-genres">-</span></div>
-            <div class="pref-item"><strong>🎬 Top Directors</strong><span id="p-directors">-</span></div>
-            <div class="pref-item"><strong>📅 Eras</strong><span id="p-decades">-</span></div>
-        </div>
+    <div id="content">
+      <div class="loading">Loading recommendations...</div>
     </div>
-
-    <div class="movies-grid" id="grid"></div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script>
-    // Extract username from URL path (e.g. /davidehrlich -> davidehrlich)
-    const username = window.location.pathname.substring(1); 
-    document.title = `Results for ${username}`;
-    document.getElementById('pageTitle').textContent = `For: ${username}`;
-
-    let moviesData = [];
-
-    // Helper: Time Formatter
-    function formatTime(ms) {
-        if(!ms) return "00:00";
-        const m = Math.floor(ms / 60000);
-        const s = Math.floor((ms % 60000) / 1000);
-        const mil = Math.floor((ms % 1000) / 10);
-        return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}.${mil.toString().padStart(2,'0')}`;
+    const username = window.location.pathname.split('/').filter(Boolean)[0];
+    
+    if (!username) {
+      document.getElementById('content').innerHTML = '<div class="error">No username provided</div>';
+    } else {
+      loadRecommendations(username);
     }
 
-    async function init() {
-        // 1. Try to get data from LocalStorage (fastest - "handoff" from index)
+    async function loadRecommendations(username) {
+      try {
+        // Try to get from localStorage first
         const cacheKey = `lb_data_${username}`;
         const cached = localStorage.getItem(cacheKey);
         
+        let responseData;
+        let executionTime;
+
         if (cached) {
-            try {
-                const parsed = JSON.parse(cached);
-                // Validar si es data reciente (opcional, ej: < 1 hora)
-                if (parsed.data && parsed.data.recommendations) {
-                    render(parsed.data);
-                    if (parsed.executionTime) {
-                        document.getElementById('timerDisplay').textContent = "⏱️ " + formatTime(parsed.executionTime);
-                    }
-                    document.getElementById('loader').style.display = 'none';
-                    return;
-                }
-            } catch(e) { console.error("Cache parse error", e); }
+          const parsed = JSON.parse(cached);
+          responseData = parsed.data;
+          executionTime = parsed.executionTime;
+        } else {
+          // If not in cache, fetch from API
+          document.getElementById('content').innerHTML = '<div class="loading">Fetching recommendations from server...</div>';
+          
+          const response = await fetch('/api/recommend', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username})
+          });
+          
+          if (!response.ok) {
+            throw new Error('Failed to fetch recommendations');
+          }
+          
+          responseData = await response.json();
+          executionTime = 0; // No timer for direct API calls
         }
 
-        // 2. If no cache (direct link access), fetch from API
-        // NOTE: The timer will show the *fetch* time, not the original scrape time.
-        const start = new Date();
-        try {
-            const res = await fetch('/api/recommend', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ username: username, country: 'CL' }) // Default country if direct link
-            });
-            const data = await res.json();
-            
-            if(!res.ok) throw new Error(data.error);
-            
-            const timeTaken = new Date() - start;
-            render(data);
-            document.getElementById('timerDisplay').textContent = "⏱️ " + formatTime(timeTaken);
-        } catch(e) {
-            document.querySelector('.spinner').textContent = "Error";
-            document.querySelector('.loading-overlay div:last-child').textContent = e.message;
-        } finally {
-            if(document.getElementById('grid').children.length > 0) {
-                document.getElementById('loader').style.display = 'none';
-            }
-        }
+        displayRecommendations(responseData, executionTime);
+      } catch (error) {
+        document.getElementById('content').innerHTML = `<div class="error">Error: ${error.message}</div>`;
+      }
     }
 
-    function render(data) {
-        moviesData = data.recommendations;
-        document.getElementById('pageSub').textContent = `Based on your profile. Region: ${data.country_name || 'Global'}`;
-        
-        // Prefs
-        document.getElementById('p-genres').textContent = (data.preferences?.genres || []).join(', ');
-        document.getElementById('p-directors').textContent = (data.preferences?.directors || []).join(', ');
-        document.getElementById('p-decades').textContent = (data.preferences?.decades || []).join(', ');
+    function displayRecommendations(data, executionTime) {
+      document.getElementById('usernameDisplay').textContent = `@${data.username}`;
 
-        // Grid
-        const grid = document.getElementById('grid');
-        grid.innerHTML = '';
-        
-        data.recommendations.forEach(m => {
-            const div = document.createElement('div');
-            div.className = 'movie-card';
-            
-            const platforms = (m.streaming || []).map(p => `<span class="platform">${p}</span>`).join('');
-            const streamHtml = platforms ? `<div class="streaming-sec">${platforms}</div>` : '';
-            const poster = m.poster || 'https://via.placeholder.com/300x450';
+      const timeStr = formatTime(executionTime);
 
-            div.innerHTML = `
-                <img src="${poster}" class="movie-poster" loading="lazy">
-                <div class="movie-info">
-                    <div class="title">${m.title}</div>
-                    <div class="meta">${m.year || ''} • ${m.director || ''}</div>
-                    <div class="rating">⭐ ${m.rating_tmdb || 'N/A'}</div>
-                    <div class="reason">💡 ${m.reason}</div>
-                    ${streamHtml}
-                </div>
-            `;
-            grid.appendChild(div);
-        });
+      let html = `
+        <div class="info-box">
+          <div>
+            <div class="timer-display">⏱️ Execution Time: ${timeStr}</div>
+            <div style="color: #888; font-size: 0.85rem; margin-top: 5px;">
+              Analyzed ${data.pages} page${data.pages !== 1 ? 's' : ''} • ${data.country_name}
+            </div>
+          </div>
+          <button class="export-btn" onclick="exportToExcel()">📊 Export to Excel</button>
+        </div>
+
+        <div class="preferences">
+          <h2>Your Preferences</h2>
+          <div class="pref-section">
+            <div class="pref-label">Favorite Genres:</div>
+            <div class="pref-value">${data.preferences.genres.join(', ') || 'N/A'}</div>
+          </div>
+          <div class="pref-section">
+            <div class="pref-label">Favorite Directors:</div>
+            <div class="pref-value">${data.preferences.directors.join(', ') || 'N/A'}</div>
+          </div>
+          <div class="pref-section">
+            <div class="pref-label">Favorite Decades:</div>
+            <div class="pref-value">${data.preferences.decades.join(', ') || 'N/A'}</div>
+          </div>
+        </div>
+
+        <h2 style="color: #00e054; margin-bottom: 20px;">Recommended Movies</h2>
+        <div class="recommendations">
+      `;
+
+      data.recommendations.forEach(movie => {
+        const poster = movie.poster || 'https://via.placeholder.com/280x400?text=No+Poster';
+        const year = movie.year || 'N/A';
+        const director = movie.director || 'Unknown';
+        const rating = movie.rating_tmdb ? `⭐ ${movie.rating_tmdb}` : '';
+        const genres = movie.genres && movie.genres.length ? movie.genres.join(', ') : '';
+        const reason = movie.reason || '';
+        
+        let streamingHTML = '';
+        if (movie.streaming && movie.streaming.length > 0) {
+          streamingHTML = '<div class="streaming">' +
+            movie.streaming.map(s => `<span class="streaming-badge">${s}</span>`).join('') +
+            '</div>';
+        }
+
+        html += `
+          <div class="movie-card">
+            <img src="${poster}" alt="${movie.title}" class="movie-poster" onerror="this.src='https://via.placeholder.com/280x400?text=No+Poster'">
+            <div class="movie-info">
+              <div class="movie-title">${movie.title}</div>
+              <div class="movie-meta">${year} • ${director}</div>
+              ${rating ? `<div class="movie-meta">${rating}</div>` : ''}
+              ${genres ? `<div class="movie-meta">${genres}</div>` : ''}
+              ${reason ? `<div class="movie-reason">${reason}</div>` : ''}
+              ${streamingHTML}
+            </div>
+          </div>
+        `;
+      });
+
+      html += '</div>';
+      document.getElementById('content').innerHTML = html;
+
+      // Store data globally for export
+      window.recommendationsData = data;
+    }
+
+    function formatTime(ms) {
+      if (!ms) return '00:00.00';
+      const m = Math.floor((ms % 3600000) / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      const milli = Math.floor((ms % 1000) / 10);
+      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${milli.toString().padStart(2, '0')}`;
     }
 
     function exportToExcel() {
-        if (!moviesData.length) return alert('No data');
-        const ws = XLSX.utils.json_to_sheet(moviesData.map(m => ({
-            Title: m.title,
-            Year: m.year,
-            Rating: m.rating_tmdb,
-            Director: m.director,
-            Reason: m.reason,
-            Streaming: (m.streaming||[]).join(', ')
-        })));
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Recs");
-        XLSX.writeFile(wb, `recs_${username}.xlsx`);
-    }
+      if (!window.recommendationsData) {
+        alert('No data to export');
+        return;
+      }
 
-    // Run
-    init();
+      const data = window.recommendationsData;
+      const rows = data.recommendations.map(movie => ({
+        'Title': movie.title,
+        'Year': movie.year || '',
+        'Director': movie.director || '',
+        'Genres': (movie.genres || []).join(', '),
+        'TMDB Rating': movie.rating_tmdb || '',
+        'Streaming': (movie.streaming || []).join(', '),
+        'Reason': movie.reason || ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Recommendations');
+      
+      XLSX.writeFile(wb, `${data.username}_recommendations.xlsx`);
+    }
   </script>
 </body>
 </html>
