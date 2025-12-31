@@ -32,19 +32,6 @@ DEFAULT_MAX_FILMS = int(os.getenv("DEFAULT_MAX_FILMS") or 30)
 DEFAULT_LIMIT_RECS = int(os.getenv("DEFAULT_LIMIT_RECS") or 60)
 MIN_RECOMMEND_RATING = float(os.getenv("MIN_RECOMMEND_RATING", "7.0"))
 
-# --- (MANTENER CLASES RateLimiter, Cache, MovieRecommender Y FUNCIONES AUXILIARES IGUAL QUE ANTES) ---
-# He omitido las clases internas para ahorrar espacio en la respuesta, 
-# pero DEBES mantener todo el código de lógica (RateLimiter, Cache, MovieRecommender) 
-# exactamente igual a tu archivo original hasta llegar a las rutas de Flask.
-
-# ... [INSERTA AQUÍ LAS CLASES RateLimiter, Cache, MovieRecommender y funciones auxiliares] ...
-
-# Para que el código funcione, copiaré las clases críticas de tu archivo original aquí abajo
-# Si ya las tienes, solo asegúrate de no borrarlas.
-# ---------------------------------------------------
-# (Aquí iría todo el bloque de lógica que ya tienes en tu main.py original)
-# ---------------------------------------------------
-
 # Simple RateLimiter (per-service)
 class RateLimiter:
     def __init__(self, min_interval=0.25):
@@ -86,8 +73,8 @@ class Cache:
         else:
             self.caches['tmdb'] = TTLCache(maxsize=5000, ttl=ONE_MONTH)
             self.caches['similar'] = TTLCache(maxsize=5000, ttl=ONE_MONTH)
-            self.caches['streaming'] = TTLCache(maxsize=5000, ttl=60 * 60 * 24) # 1 día está bien para streaming
-            self.caches['user_scrape'] = TTLCache(maxsize=1000, ttl=ONE_WEEK)   # Guardar perfil 1 semana
+            self.caches['streaming'] = TTLCache(maxsize=5000, ttl=60 * 60 * 24)
+            self.caches['user_scrape'] = TTLCache(maxsize=1000, ttl=ONE_WEEK)
     def _init_redis(self):
         if self._redis_attempted: return
         self._redis_attempted = True
@@ -391,8 +378,8 @@ def recommend():
         logger.exception("Error")
         return jsonify({'error': str(e)}), 500
 
-# NUEVA RUTA: Sirve el archivo de resultados para cualquier /nombre_usuario
-@app.route('/username')
+# NUEVA RUTA: Sirve el archivo de resultados para cualquier /{username}
+@app.route('/<username>')
 def user_view(username):
     return app.send_static_file('results.html')
 
