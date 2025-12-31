@@ -13,140 +13,256 @@
       margin: 0;
       padding: 20px;
       min-height: 100vh;
+      line-height: 1.6;
     }
     .container {
       max-width: 1200px;
       margin: 0 auto;
+      position: relative;
+      padding: 10px;
     }
+
+    /* Timer top right corner */
+    .final-timer {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 189, 0, 0.95);
+      color: #000;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 1.05rem;
+      font-weight: bold;
+      font-family: monospace;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+    }
+
+    /* Export button top left corner */
+    .export-button {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 224, 84, 0.95);
+      color: #000;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: bold;
+      font-family: monospace;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      cursor: pointer;
+      border: none;
+      transition: all 0.18s;
+    }
+    .export-button:hover {
+      background: rgba(0, 255, 94, 1);
+      transform: translateY(-2px);
+    }
+
     .header {
       text-align: center;
       margin-bottom: 30px;
+      background: #1e1e1e;
+      padding: 2rem;
+      border-radius: 12px;
+      border: 1px solid #333;
     }
     h1 {
       font-size: 2.5rem;
       color: #00e054;
       text-shadow: 0 0 15px rgba(0, 224, 84, 0.4);
       margin-bottom: 10px;
+      letter-spacing: -0.5px;
     }
     .username {
       font-size: 1.3rem;
       color: #ffbd00;
-      margin-bottom: 20px;
+      margin-bottom: 10px;
     }
-    .info-box {
-      background: #1e1e1e;
-      padding: 20px;
-      border-radius: 12px;
-      border: 1px solid #333;
-      margin-bottom: 30px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 15px;
+    .country-info {
+      font-size: 0.9rem;
+      color: #a0a0a0;
+      margin-top: 10px;
     }
-    .timer-display {
-      font-size: 1.2rem;
-      color: #ffbd00;
-      font-weight: bold;
-    }
-    .export-btn {
-      padding: 12px 24px;
-      background: #00e054;
-      color: #000;
-      border: none;
+    .back-btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background: #333;
+      color: #fff;
+      text-decoration: none;
       border-radius: 8px;
-      font-weight: bold;
-      cursor: pointer;
-      font-family: inherit;
-      font-size: 0.95rem;
+      margin-bottom: 20px;
       transition: all 0.2s;
+      font-family: inherit;
     }
-    .export-btn:hover {
-      background: #00ff5e;
-      transform: scale(1.05);
+    .back-btn:hover {
+      background: #444;
     }
+
+    /* Preferences block */
     .preferences {
       background: #1e1e1e;
-      padding: 20px;
-      border-radius: 12px;
+      padding: 1rem;
+      border-radius: 8px;
       border: 1px solid #333;
-      margin-bottom: 30px;
+      margin-bottom: 1.6rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.22);
     }
     .preferences h2 {
-      color: #00e054;
-      margin-top: 0;
+      font-size: 1.4rem;
+      margin: 0 0 1rem 0;
+      color: #e0e0e0;
+      border-left: 4px solid #00e054;
+      padding-left: 12px;
     }
-    .pref-section {
-      margin-bottom: 15px;
+    .pref-item { margin-bottom: 0.6rem; font-size: 0.92rem; line-height: 1.4; }
+    .pref-label { color: #00e054; font-weight: bold; }
+
+    /* Controls */
+    .controls {
+      background: #1e1e1e;
+      padding: 1.2rem;
+      border-radius: 8px;
+      border: 1px solid #333;
+      margin-bottom: 1.6rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.22);
     }
-    .pref-label {
-      color: #888;
-      font-size: 0.9rem;
-      margin-bottom: 5px;
+    .controls-section { margin-bottom: 1rem; }
+    .controls-title { font-size: 1rem; color: #00e054; font-weight: bold; margin-bottom: 0.8rem; }
+    .filter-group { display:flex; flex-wrap:wrap; gap:12px; align-items: center; justify-content: flex-start;}
+    .checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      color: #e0e0e0;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+      border: 1px solid #333;
+      transition: all 0.18s;
+      cursor: pointer;
+      flex: 0 0 auto;
+      width: auto;
+      max-width: none;
     }
-    .pref-value {
-      color: #fff;
-      font-size: 1rem;
+    .checkbox-label input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      transform: scale(1);
     }
-    .recommendations {
+    .checkbox-label:hover {
+      background: rgba(0, 224, 84, 0.06);
+      border-color: #00e054;
+    }
+    .sort-group { display:flex; gap:12px; flex-wrap:wrap; }
+    .sort-button {
+      padding:8px 16px; background:#00e054; color:#000; border:none; border-radius:6px; font-size:0.85rem;
+      font-weight:bold; cursor:pointer; transition:all 0.18s; font-family: 'Consolas', monospace;
+    }
+    .sort-button:hover { background:#00ff5e; transform: translateY(-2px); }
+    .sort-button.active { background:#ffbd00; }
+
+    h2.results-title {
+      font-size: 1.4rem;
+      margin: 1.2rem 0 0.6rem;
+      color: #e0e0e0;
+      border-left: 4px solid #00e054;
+      padding-left: 12px;
+    }
+
+    /* Movies grid & cards */
+    .movies-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 20px;
-      margin-bottom: 30px;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 18px;
+      margin-top: 12px;
     }
     .movie-card {
       background: #1e1e1e;
-      border: 1px solid #333;
-      border-radius: 12px;
+      border-radius: 10px;
       overflow: hidden;
-      transition: all 0.3s;
-      cursor: pointer;
+      border: 1px solid #2b2b2b;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 330px;
+      gap: 8px;
+      padding-bottom: 6px;
     }
     .movie-card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 14px 30px rgba(0,0,0,0.6);
       border-color: #00e054;
-      transform: translateY(-5px);
-      box-shadow: 0 10px 30px rgba(0, 224, 84, 0.2);
     }
+
     .movie-poster {
       width: 100%;
-      height: 400px;
+      aspect-ratio: 2/3;
       object-fit: cover;
-      background: #2a2a2a;
+      display: block;
+      flex-shrink: 0;
     }
+
     .movie-info {
-      padding: 15px;
-    }
-    .movie-title {
-      font-size: 1.1rem;
-      font-weight: bold;
-      color: #fff;
-      margin-bottom: 5px;
-    }
-    .movie-meta {
-      font-size: 0.85rem;
-      color: #888;
-      margin-bottom: 8px;
-    }
-    .movie-reason {
-      font-size: 0.8rem;
-      color: #00e054;
-      font-style: italic;
-      margin-bottom: 10px;
-    }
-    .streaming {
+      padding: 12px;
+      flex-grow: 1;
       display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-      margin-top: 10px;
+      flex-direction: column;
     }
-    .streaming-badge {
-      background: #333;
-      color: #fff;
-      padding: 4px 8px;
+
+    .movie-title {
+      font-weight: bold;
+      font-size: 1rem;
+      margin-bottom: 6px;
+      line-height: 1.2;
+      color: #e0e0e0;
+    }
+
+    .movie-meta { font-size: 0.82rem; color: #a0a0a0; margin-bottom: 6px; }
+    .movie-runtime { font-size: 0.78rem; color: #b0b0b0; margin-bottom: 6px; }
+    .movie-rating { font-weight: bold; color: #ffbd00; margin-bottom: 8px; font-size:0.9rem; }
+    .movie-reason {
+      font-size: 0.79rem;
+      font-style: italic;
+      color: #a0a0a0;
+      margin-bottom: 10px;
+      background: rgba(255,255,255,0.03);
+      padding: 6px 8px;
       border-radius: 4px;
-      font-size: 0.75rem;
     }
+
+    .streaming {
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px dashed #333;
+    }
+    .streaming-title {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #a0a0a0;
+      margin-bottom: 6px;
+    }
+
+    /* Platform badges */
+    .platforms { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .platform {
+      background: #00e054;
+      color: #000;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      box-sizing: border-box;
+    }
+    .no-streaming { font-size:0.8rem; color:#888; }
+
     .loading {
       text-align: center;
       padding: 60px 20px;
@@ -159,28 +275,49 @@
       color: #ff5555;
       font-size: 1.2rem;
     }
-    .back-btn {
-      display: inline-block;
-      padding: 10px 20px;
-      background: #333;
-      color: #fff;
-      text-decoration: none;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      transition: all 0.2s;
+
+    /* Responsive tweaks */
+    @media (max-width: 900px) {
+      h1 { font-size: 2rem; }
+      .movies-grid { gap: 14px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+      .movie-card { min-height: 300px; }
+      .final-timer { font-size: 0.95rem; padding: 10px 16px; top: 12px; right: 12px; }
+      .export-button { font-size: 0.85rem; padding: 10px 16px; top: 12px; left: 12px; }
     }
-    .back-btn:hover {
-      background: #444;
+    @media (max-width: 600px) {
+      body { padding: 12px; }
+      h1 { font-size: 1.6rem; }
+      .movies-grid { gap: 12px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+      .movie-card { min-height: 280px; }
+      .movie-title { font-size: 0.95rem; }
+      .filter-group { gap: 8px; }
+      .checkbox-label { font-size: 0.8rem; padding: 5px 10px; }
+      .final-timer {
+        top: 10px;
+        right: 10px;
+        font-size: 0.85rem;
+        padding: 8px 12px;
+      }
+      .export-button {
+        top: 10px;
+        left: 10px;
+        font-size: 0.75rem;
+        padding: 8px 12px;
+      }
     }
   </style>
 </head>
 <body>
+  <button class="export-button" id="exportBtn" onclick="exportToExcel()">📊 Export to Excel</button>
+  <div class="final-timer" id="finalTimer"></div>
+
   <div class="container">
     <a href="/" class="back-btn">← Back to Home</a>
     
     <div class="header">
       <h1>🎬 Movie Recommendations</h1>
       <div class="username" id="usernameDisplay"></div>
+      <div class="country-info" id="countryInfo"></div>
     </div>
 
     <div id="content">
@@ -191,6 +328,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script>
     const username = window.location.pathname.split('/').filter(Boolean)[0];
+    let originalOrder = [];
+    let moviesData = [];
     
     if (!username) {
       document.getElementById('content').innerHTML = '<div class="error">No username provided</div>';
@@ -200,7 +339,6 @@
 
     async function loadRecommendations(username) {
       try {
-        // Try to get from localStorage first
         const cacheKey = `lb_data_${username}`;
         const cached = localStorage.getItem(cacheKey);
         
@@ -212,7 +350,6 @@
           responseData = parsed.data;
           executionTime = parsed.executionTime;
         } else {
-          // If not in cache, fetch from API
           document.getElementById('content').innerHTML = '<div class="loading">Fetching recommendations from server...</div>';
           
           const response = await fetch('/api/recommend', {
@@ -226,7 +363,7 @@
           }
           
           responseData = await response.json();
-          executionTime = 0; // No timer for direct API calls
+          executionTime = 0;
         }
 
         displayRecommendations(responseData, executionTime);
@@ -235,109 +372,213 @@
       }
     }
 
+    function formatTime(ms) {
+      if (!ms) return '00:00:00';
+      const h = Math.floor(ms / 3600000);
+      const m = Math.floor((ms % 3600000) / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function formatRuntime(minutes) {
+      if (!minutes || minutes === 0) return 'N/A';
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      return h > 0 ? `${h}h ${m}min` : `${m}min`;
+    }
+
     function displayRecommendations(data, executionTime) {
       document.getElementById('usernameDisplay').textContent = `@${data.username}`;
+      document.getElementById('countryInfo').textContent = `📊 Analyzed ${data.pages} page${data.pages !== 1 ? 's' : ''} • ${data.country_name}`;
 
       const timeStr = formatTime(executionTime);
+      document.getElementById('finalTimer').textContent = `⏱️ ${timeStr}`;
+
+      moviesData = data.recommendations || [];
 
       let html = `
-        <div class="info-box">
-          <div>
-            <div class="timer-display">⏱️ Execution Time: ${timeStr}</div>
-            <div style="color: #888; font-size: 0.85rem; margin-top: 5px;">
-              Analyzed ${data.pages} page${data.pages !== 1 ? 's' : ''} • ${data.country_name}
+        <!-- Preferences block -->
+        <div class="preferences">
+          <h2>📊 Your Cinematic Profile</h2>
+          <div class="pref-item">
+            <span class="pref-label">Favorite genres:</span>
+            <span>${(data.preferences.genres || []).join(', ') || 'N/A'}</span>
+          </div>
+          <div class="pref-item">
+            <span class="pref-label">Directors you love:</span>
+            <span>${(data.preferences.directors || []).join(', ') || 'N/A'}</span>
+          </div>
+          <div class="pref-item">
+            <span class="pref-label">Preferred decades:</span>
+            <span>${(data.preferences.decades || []).join(', ') || 'N/A'}</span>
+          </div>
+        </div>
+
+        <!-- Filter and sort controls -->
+        <div class="controls">
+          <div class="controls-section">
+            <div class="controls-title">🎬 Filter by Streaming Platform</div>
+            <div class="filter-group" id="streaming-filters"></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-title">📊 Sort Movies</div>
+            <div class="sort-group">
+              <button class="sort-button" onclick="sortMovies('rating-desc')" id="btn-rating-desc">⭐ Rating ↓</button>
+              <button class="sort-button" onclick="sortMovies('rating-asc')" id="btn-rating-asc">⭐ Rating ↑</button>
+              <button class="sort-button" onclick="sortMovies('runtime-desc')" id="btn-runtime-desc">⏱️ Runtime ↓</button>
+              <button class="sort-button" onclick="sortMovies('runtime-asc')" id="btn-runtime-asc">⏱️ Runtime ↑</button>
+              <button class="sort-button active" onclick="sortMovies('reset')" id="btn-reset">🔄 Original Order</button>
             </div>
           </div>
-          <button class="export-btn" onclick="exportToExcel()">📊 Export to Excel</button>
         </div>
 
-        <div class="preferences">
-          <h2>Your Preferences</h2>
-          <div class="pref-section">
-            <div class="pref-label">Favorite Genres:</div>
-            <div class="pref-value">${data.preferences.genres.join(', ') || 'N/A'}</div>
-          </div>
-          <div class="pref-section">
-            <div class="pref-label">Favorite Directors:</div>
-            <div class="pref-value">${data.preferences.directors.join(', ') || 'N/A'}</div>
-          </div>
-          <div class="pref-section">
-            <div class="pref-label">Favorite Decades:</div>
-            <div class="pref-value">${data.preferences.decades.join(', ') || 'N/A'}</div>
-          </div>
-        </div>
-
-        <h2 style="color: #00e054; margin-bottom: 20px;">Recommended Movies</h2>
-        <div class="recommendations">
+        <h2 class="results-title">🎯 Recommended Movies</h2>
+        <div class="movies-grid" id="grid"></div>
       `;
 
-      data.recommendations.forEach(movie => {
-        const poster = movie.poster || 'https://via.placeholder.com/280x400?text=No+Poster';
-        const year = movie.year || 'N/A';
-        const director = movie.director || 'Unknown';
-        const rating = movie.rating_tmdb ? `⭐ ${movie.rating_tmdb}` : '';
-        const genres = movie.genres && movie.genres.length ? movie.genres.join(', ') : '';
-        const reason = movie.reason || '';
-        
-        let streamingHTML = '';
-        if (movie.streaming && movie.streaming.length > 0) {
-          streamingHTML = '<div class="streaming">' +
-            movie.streaming.map(s => `<span class="streaming-badge">${s}</span>`).join('') +
-            '</div>';
-        }
+      document.getElementById('content').innerHTML = html;
 
-        html += `
-          <div class="movie-card">
-            <img src="${poster}" alt="${movie.title}" class="movie-poster" onerror="this.src='https://via.placeholder.com/280x400?text=No+Poster'">
-            <div class="movie-info">
-              <div class="movie-title">${movie.title}</div>
-              <div class="movie-meta">${year} • ${director}</div>
-              ${rating ? `<div class="movie-meta">${rating}</div>` : ''}
-              ${genres ? `<div class="movie-meta">${genres}</div>` : ''}
-              ${reason ? `<div class="movie-reason">${reason}</div>` : ''}
-              ${streamingHTML}
+      // Get all unique platforms
+      const allPlatforms = new Set();
+      moviesData.forEach(m => {
+        if (m.streaming) {
+          m.streaming.forEach(p => allPlatforms.add(p));
+        }
+      });
+
+      // Create streaming filters
+      const filtersContainer = document.getElementById('streaming-filters');
+      if (allPlatforms.size > 0) {
+        Array.from(allPlatforms).sort().forEach(platform => {
+          const label = document.createElement('label');
+          label.className = 'checkbox-label';
+          label.innerHTML = `
+            <input type="checkbox" value="${platform}" onchange="filterMovies()">
+            <span>${platform}</span>
+          `;
+          filtersContainer.appendChild(label);
+        });
+      } else {
+        filtersContainer.innerHTML = '<span style="color: #888; font-size: 0.85rem;">No platforms available</span>';
+      }
+
+      // Render movies
+      const grid = document.getElementById('grid');
+      moviesData.forEach((movie, i) => {
+        const card = document.createElement('div');
+        card.className = 'movie-card';
+        card.setAttribute('data-streaming', movie.streaming ? movie.streaming.join(',') : '');
+        card.setAttribute('data-rating', movie.rating_tmdb ?? 0);
+        card.setAttribute('data-runtime', movie.runtime || 0);
+        card.setAttribute('data-index', i);
+
+        const platformsHTML = movie.streaming && movie.streaming.length > 0
+          ? movie.streaming.map(p => `<span class="platform">${p}</span>`).join('')
+          : '<div class="no-streaming">Not available on streaming</div>';
+
+        const poster = movie.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
+        const title = movie.title || 'Untitled';
+        const year = movie.year || '—';
+        const director = movie.director || 'Unknown';
+        const runtimeText = formatRuntime(movie.runtime);
+        const ratingText = (movie.rating_tmdb !== undefined && movie.rating_tmdb !== null) ? `${movie.rating_tmdb}/10` : 'N/A';
+        const reason = movie.reason || '';
+
+        card.innerHTML = `
+          <img src="${poster}" class="movie-poster" loading="lazy" alt="${title}" onerror="this.src='https://via.placeholder.com/300x450?text=No+Poster'">
+          <div class="movie-info">
+            <div class="movie-title">${title}</div>
+            <div class="movie-meta">${year} • ${director}</div>
+            <div class="movie-runtime">⏱️ ${runtimeText}</div>
+            <div class="movie-rating">⭐ ${ratingText}</div>
+            <div class="movie-reason">💡 ${reason}</div>
+            <div class="streaming">
+              <div class="streaming-title">Available in ${data.country_name}:</div>
+              <div class="platforms">${platformsHTML}</div>
             </div>
           </div>
         `;
+        grid.appendChild(card);
       });
 
-      html += '</div>';
-      document.getElementById('content').innerHTML = html;
-
-      // Store data globally for export
-      window.recommendationsData = data;
+      // Save original order
+      originalOrder = Array.from(grid.children);
     }
 
-    function formatTime(ms) {
-      if (!ms) return '00:00.00';
-      const m = Math.floor((ms % 3600000) / 60000);
-      const s = Math.floor((ms % 60000) / 1000);
-      const milli = Math.floor((ms % 1000) / 10);
-      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${milli.toString().padStart(2, '0')}`;
+    function filterMovies() {
+      const checkboxes = document.querySelectorAll('#streaming-filters input[type="checkbox"]');
+      const selectedPlatforms = Array.from(checkboxes)
+        .filter(cb => cb.checked)
+        .map(cb => cb.value);
+
+      const movieCards = document.querySelectorAll('.movie-card');
+
+      movieCards.forEach(card => {
+        const cardPlatforms = card.getAttribute('data-streaming').split(',').filter(p => p);
+
+        if (selectedPlatforms.length === 0) {
+          card.style.display = 'flex';
+        } else {
+          const hasMatch = selectedPlatforms.some(platform => cardPlatforms.includes(platform));
+          card.style.display = hasMatch ? 'flex' : 'none';
+        }
+      });
+    }
+
+    function sortMovies(type) {
+      const container = document.getElementById('grid');
+      const cards = Array.from(container.children);
+
+      document.querySelectorAll('.sort-button').forEach(btn => btn.classList.remove('active'));
+
+      let sortedCards;
+
+      if (type === 'rating-desc') {
+        sortedCards = cards.sort((a, b) => parseFloat(b.getAttribute('data-rating')) - parseFloat(a.getAttribute('data-rating')));
+        document.getElementById('btn-rating-desc').classList.add('active');
+      } else if (type === 'rating-asc') {
+        sortedCards = cards.sort((a, b) => parseFloat(a.getAttribute('data-rating')) - parseFloat(b.getAttribute('data-rating')));
+        document.getElementById('btn-rating-asc').classList.add('active');
+      } else if (type === 'runtime-desc') {
+        sortedCards = cards.sort((a, b) => parseInt(b.getAttribute('data-runtime')) - parseInt(a.getAttribute('data-runtime')));
+        document.getElementById('btn-runtime-desc').classList.add('active');
+      } else if (type === 'runtime-asc') {
+        sortedCards = cards.sort((a, b) => parseInt(a.getAttribute('data-runtime')) - parseInt(b.getAttribute('data-runtime')));
+        document.getElementById('btn-runtime-asc').classList.add('active');
+      } else if (type === 'reset') {
+        sortedCards = originalOrder;
+        document.getElementById('btn-reset').classList.add('active');
+      } else {
+        sortedCards = cards;
+      }
+
+      container.innerHTML = '';
+      sortedCards.forEach(card => container.appendChild(card));
     }
 
     function exportToExcel() {
-      if (!window.recommendationsData) {
+      if (moviesData.length === 0) {
         alert('No data to export');
         return;
       }
 
-      const data = window.recommendationsData;
-      const rows = data.recommendations.map(movie => ({
-        'Title': movie.title,
+      const exportData = moviesData.map(movie => ({
+        'Title': movie.title || '',
         'Year': movie.year || '',
         'Director': movie.director || '',
+        'Runtime': formatRuntime(movie.runtime),
+        'Rating (TMDb)': movie.rating_tmdb !== undefined && movie.rating_tmdb !== null ? `${movie.rating_tmdb}/10` : 'N/A',
         'Genres': (movie.genres || []).join(', '),
-        'TMDB Rating': movie.rating_tmdb || '',
-        'Streaming': (movie.streaming || []).join(', '),
-        'Reason': movie.reason || ''
+        'Reason': movie.reason || '',
+        'Streaming Platforms': (movie.streaming || []).join(', '),
+        'Poster URL': movie.poster || ''
       }));
 
-      const ws = XLSX.utils.json_to_sheet(rows);
+      const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Recommendations');
       
-      XLSX.writeFile(wb, `${data.username}_recommendations.xlsx`);
+      XLSX.writeFile(wb, `${username}_recommendations.xlsx`);
     }
   </script>
 </body>
