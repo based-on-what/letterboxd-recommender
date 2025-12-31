@@ -392,17 +392,9 @@ def recommend():
         return jsonify({'error': str(e)}), 500
 
 # NUEVA RUTA: Sirve el archivo de resultados para cualquier /nombre_usuario
-@app.route('/<path:username>')
+@app.route('/username')
 def user_view(username):
-    # Evitar conflictos con rutas de API o assets (favicon, css, js) si no están en carpeta
-    if username.startswith('api/') or username == 'favicon.ico':
-        return jsonify({'error': 'not found'}), 404
-    
-    # Comprobación básica de seguridad o existencia del archivo
-    if os.path.exists('results.html'):
-        return app.send_static_file('results.html')
-    else:
-        return "results.html not found on server", 500
+    return app.send_static_file('results.html')
 
 import atexit
 @atexit.register
