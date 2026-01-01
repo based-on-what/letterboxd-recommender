@@ -445,6 +445,7 @@
     let selectedPlatforms = new Set();
     let currentSort = 'original';
     let userCountryName = 'Global';
+    let userCountryCode = 'US';
 
     document.title = `Results for ${username}`;
     document.getElementById('pageTitle').textContent = `For: ${username}`;
@@ -457,6 +458,16 @@
         .map(char => 127397 + char.charCodeAt());
       return String.fromCodePoint(...codePoints);
     }
+
+    // Detect country automatically
+    window.onload = async () => {
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        userCountryCode = data.country_code || 'US';
+        userCountryName = data.country_name || 'Global';
+      } catch (e) {}
+    };
 
     // Helper: Time Formatter
     function formatTime(ms) {
@@ -496,7 +507,7 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ 
             username: username, 
-            country: 'CL',
+            country: userCountryCode,
             include_streaming: true
           })
         });
@@ -523,10 +534,13 @@
     function render(data) {
       moviesData = data.recommendations || [];
       originalMoviesData = [...moviesData];
-      userCountryName = data.country_name || 'Global';
+      userCountryName = data.country_name || userCountryName;
+      if (data.country_code) {
+        userCountryCode = data.country_code;
+      }
       
       document.getElementById('pageSub').textContent = 
-        `Based on your profile. Region: ${data.country_name || 'Global'}`;
+        `Based on your profile. Region: ${userCountryName} ${countryCodeToFlag(userCountryCode)}`;
       
       // Render preferences
       document.getElementById('p-genres').textContent = 
@@ -601,7 +615,7 @@
         
         const streamHtml = platforms 
           ? `<div class="streaming-sec">${platforms}</div>` 
-          : `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">❌ Movie not available on streaming services in ${userCountryName} ${countryCodeToFlag('CL')}</div>`;
+          : `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">❌ Movie not available on streaming services in ${userCountryName} ${countryCodeToFlag(userCountryCode)}</div>`;
         
         const poster = m.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
         const runtime = m.runtime ? `${m.runtime} min` : 'N/A';
