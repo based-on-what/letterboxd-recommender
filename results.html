@@ -444,9 +444,19 @@
     let originalMoviesData = [];
     let selectedPlatforms = new Set();
     let currentSort = 'original';
+    let userCountryName = 'Global';
 
     document.title = `Results for ${username}`;
     document.getElementById('pageTitle').textContent = `For: ${username}`;
+
+    // Convert country code to flag emoji
+    function countryCodeToFlag(countryCode) {
+      const codePoints = countryCode
+        .toUpperCase()
+        .split('')
+        .map(char => 127397 + char.charCodeAt());
+      return String.fromCodePoint(...codePoints);
+    }
 
     // Helper: Time Formatter
     function formatTime(ms) {
@@ -513,6 +523,7 @@
     function render(data) {
       moviesData = data.recommendations || [];
       originalMoviesData = [...moviesData];
+      userCountryName = data.country_name || 'Global';
       
       document.getElementById('pageSub').textContent = 
         `Based on your profile. Region: ${data.country_name || 'Global'}`;
@@ -590,7 +601,7 @@
         
         const streamHtml = platforms 
           ? `<div class="streaming-sec">${platforms}</div>` 
-          : '';
+          : `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">❌ Movie not available on streaming services in your ${userCountryName} ${countryCodeToFlag('CL')}</div>`;
         
         const poster = m.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
         const runtime = m.runtime ? `${m.runtime} min` : 'N/A';
