@@ -601,7 +601,7 @@
         
         const streamHtml = platforms 
           ? `<div class="streaming-sec">${platforms}</div>` 
-          : `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">❌ Movie not available on streaming services in your ${userCountryName} ${countryCodeToFlag('CL')}</div>`;
+          : `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">❌ Movie not available on streaming services in ${userCountryName} ${countryCodeToFlag('CL')}</div>`;
         
         const poster = m.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
         const runtime = m.runtime ? `${m.runtime} min` : 'N/A';
