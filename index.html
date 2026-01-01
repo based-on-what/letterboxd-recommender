@@ -13,9 +13,8 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
+      height: 100vh;
       margin: 0;
-      padding: 20px;
     }
     .input-section {
       background: #1e1e1e;
@@ -24,8 +23,6 @@
       border: 1px solid #333;
       text-align: center;
       box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-      max-width: 500px;
-      width: 100%;
     }
     h1 {
       font-size: 2.2rem;
@@ -63,74 +60,44 @@
     .loading-box { display: none; margin-top: 25px; }
     .timer { font-size: 1.5rem; color: #ffbd00; font-weight: bold; margin-bottom: 10px;}
     .status { color: #888; font-size: 0.9rem; }
-    
-    .go-button {
-      display: none;
-      padding: 18px 36px;
-      background: linear-gradient(135deg, #00e054 0%, #00c853 100%);
-      color: #000;
-      border: none;
-      border-radius: 12px;
-      font-weight: bold;
-      cursor: pointer;
-      font-family: inherit;
-      margin-top: 25px;
-      font-size: 1.1rem;
-      transition: all 0.3s;
-      box-shadow: 0 5px 20px rgba(0, 224, 84, 0.3);
-    }
-    .go-button:hover {
-      background: linear-gradient(135deg, #00ff5e 0%, #00e054 100%);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 25px rgba(0, 224, 84, 0.5);
-    }
   </style>
 </head>
 <body>
   <div class="input-section">
     <h1>🎬 Letterboxd Recommender</h1>
-    <div style="color: #666; margin-bottom: 15px; font-size: 0.85rem;">
-      Coded by <a href="https://github.com/based-on-what/letterboxd-recommender" target="_blank" rel="noopener noreferrer" style="color: #00e054; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='#00ff5e'" onmouseout="this.style.color='#00e054'">@based-on-what</a>
+    <div style="color: #888; margin-bottom: 20px; font-size: 0.9rem;">
+      Enter your username to generate a permanent link.
     </div>
-    <div style="color: #888; margin-bottom: 10px; font-size: 0.9rem;">
-      Enter your username to generate recommendations.
-    </div>
-    <div id="countryDisplay" style="color: #00e054; margin-bottom: 20px; font-size: 0.85rem;">
-      📍 Detecting location...
+    <div id="country-info" style="color: #888; margin-bottom: 20px; font-size: 0.9rem;">
+      📍 Searching movie recommendations in: -- 🌍
     </div>
     
     <input type="text" id="username" placeholder="Username (e.g. davidehrlich)" onkeypress="if(event.key==='Enter')startProcess()">
     <br>
     <button id="btn" onclick="startProcess()">Generate Recommendations</button>
+    <button id="recommendations-btn" style="display: none; width: 280px; margin: 0 auto; margin-top: 30px;" onclick="navigateToRecommendations()"></button>
 
     <div id="loading" class="loading-box">
       <div class="timer" id="chronometer">00:00.00</div>
       <div class="status">Analyzing profile & fetching data...</div>
+      <div class="status" style="font-size: 0.8rem; margin-top: 5px; color: #555;">(A new tab will open when finished)</div>
     </div>
-
-    <button id="goButton" class="go-button" onclick="goToRecommendations()">
-      Go to <span id="usernameDisplay"></span> recommendations →
-    </button>
   </div>
 
   <script>
     let startTime;
     let timerInterval;
     let userCountry = 'CL';
-    let currentUsername = '';
-    let countryName = 'Chile';
+    let userCountryName = 'Global';
 
-    // Country names mapping
-    const countryNames = {
-      'CL': 'Chile', 'AR': 'Argentina', 'MX': 'Mexico', 'US': 'United States',
-      'ES': 'Spain', 'BR': 'Brazil', 'CO': 'Colombia', 'PE': 'Peru', 'UY': 'Uruguay',
-      'IT': 'Italy', 'FR': 'France', 'DE': 'Germany', 'GB': 'United Kingdom',
-      'CA': 'Canada', 'AU': 'Australia', 'NZ': 'New Zealand', 'JP': 'Japan',
-      'KR': 'South Korea', 'IN': 'India', 'CN': 'China', 'NL': 'Netherlands',
-      'SE': 'Sweden', 'NO': 'Norway', 'DK': 'Denmark', 'FI': 'Finland',
-      'PT': 'Portugal', 'IE': 'Ireland', 'BE': 'Belgium', 'AT': 'Austria',
-      'CH': 'Switzerland', 'PL': 'Poland', 'CZ': 'Czech Republic', 'GR': 'Greece'
-    };
+    // Convert country code to flag emoji
+    function countryCodeToFlag(countryCode) {
+      const codePoints = countryCode
+        .toUpperCase()
+        .split('')
+        .map(char => 127397 + char.charCodeAt());
+      return String.fromCodePoint(...codePoints);
+    }
 
     // Detect country automatically
     window.onload = async () => {
@@ -138,11 +105,12 @@
         const res = await fetch('https://ipapi.co/json/');
         const data = await res.json();
         userCountry = data.country_code || 'CL';
-        countryName = countryNames[userCountry] || data.country_name || userCountry;
-        document.getElementById('countryDisplay').textContent = `📍 Streaming availability for: ${countryName}`;
-      } catch (e) {
-        document.getElementById('countryDisplay').textContent = `📍 Streaming availability for: ${countryName}`;
-      }
+        userCountryName = data.country_name || 'Global';
+        
+        const flagEmoji = countryCodeToFlag(userCountry);
+        document.getElementById('country-info').textContent = 
+          `📍 Searching movie recommendations in: ${userCountryName} ${flagEmoji}`;
+      } catch (e) {}
     };
 
     function updateTimer() {
@@ -158,12 +126,9 @@
       const username = document.getElementById('username').value.trim();
       if (!username) return alert('Please enter a username');
 
-      currentUsername = username;
-
       // UI changes
       document.getElementById('btn').disabled = true;
       document.getElementById('loading').style.display = 'block';
-      document.getElementById('goButton').style.display = 'none';
       
       startTime = new Date();
       timerInterval = setInterval(updateTimer, 50);
@@ -179,23 +144,30 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Unknown error');
 
-        clearInterval(timerInterval);
         const endTime = new Date();
         const totalTime = endTime - startTime;
 
         // Save data to localStorage to transfer to new tab instantly without re-fetching
+        // We use a specific key for this user
         const cacheKey = `lb_data_${username}`;
         localStorage.setItem(cacheKey, JSON.stringify({
           data: data,
           timestamp: new Date().getTime(),
-          executionTime: totalTime
+          executionTime: totalTime // Save the timer result
         }));
 
-        // Show the "Go to recommendations" button
+        // Hide loading and show recommendations button
+        clearInterval(timerInterval);
         document.getElementById('loading').style.display = 'none';
-        document.getElementById('btn').disabled = false;
-        document.getElementById('goButton').style.display = 'block';
-        document.getElementById('usernameDisplay').textContent = username;
+        document.getElementById('btn').style.display = 'none';
+        
+        // Show and configure the recommendations button
+        const recBtn = document.getElementById('recommendations-btn');
+        recBtn.textContent = `Get ${username}'s recommendations 🎬`;
+        recBtn.style.display = 'block';
+        
+        // Store username for navigation
+        window.currentUsername = username;
 
       } catch (e) {
         clearInterval(timerInterval);
@@ -205,9 +177,9 @@
       }
     }
 
-    function goToRecommendations() {
-      if (currentUsername) {
-        window.location.href = `/${currentUsername}`;
+    function navigateToRecommendations() {
+      if (window.currentUsername) {
+        window.location.href = `/${window.currentUsername}`;
       }
     }
   </script>
