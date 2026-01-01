@@ -445,8 +445,7 @@
     let selectedPlatforms = new Set();
     let currentSort = 'original';
     let userCountryName = 'Global';
-    let userCountryCode = 'US';
-
+    let userCountryCode = '';
     document.title = `Results for ${username}`;
     document.getElementById('pageTitle').textContent = `For: ${username}`;
 
@@ -460,23 +459,19 @@
     }
 
     // Detect country automatically
-    window.onload = async () => {
+    window.addEventListener('load', async () => {
       try {
         const res = await fetch('https://ipapi.co/json/');
         const data = await res.json();
         userCountryCode = data.country_code || 'US';
         userCountryName = data.country_name || 'Global';
-      } catch (e) {}
-    };
+      } catch (e) {
+        userCountryCode = 'US';
+      }
+      // Call init after country detection
+      init();
+    });
 
-    // Helper: Time Formatter
-    function formatTime(ms) {
-      if (!ms) return "00:00";
-      const m = Math.floor(ms / 60000);
-      const s = Math.floor((ms % 60000) / 1000);
-      const mil = Math.floor((ms % 1000) / 10);
-      return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}.${mil.toString().padStart(2,'0')}`;
-    }
 
     // Initialize app
     async function init() {
@@ -715,9 +710,6 @@
       XLSX.utils.book_append_sheet(wb, ws, "Recommendations");
       XLSX.writeFile(wb, `recommendations_${username}_${Date.now()}.xlsx`);
     }
-
-    // Run initialization
-    init();
   </script>
 </body>
 </html>
