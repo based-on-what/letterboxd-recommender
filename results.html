@@ -449,7 +449,7 @@
     document.title = `Results for ${username}`;
     document.getElementById('pageTitle').textContent = `For: ${username}`;
 
-    // Convert country code to flag emoji
+    // Convert an ISO country code to its emoji flag for UI display.
     function countryCodeToFlag(countryCode) {
       const codePoints = countryCode
         .toUpperCase()
@@ -458,7 +458,7 @@
       return String.fromCodePoint(...codePoints);
     }
 
-    // Detect country automatically
+    // Detect the visitor's country before requesting recommendations.
     window.addEventListener('load', async () => {
       try {
         const res = await fetch('https://ipapi.co/json/');
@@ -525,7 +525,7 @@
       }
     }
 
-    // Render data
+    // Render the complete recommendation payload into the page.
     function render(data) {
       moviesData = data.recommendations || [];
       originalMoviesData = [...moviesData];
@@ -578,7 +578,7 @@
       renderMovies();
     }
 
-    // Render movies to grid
+    // Render the movie cards into the grid, honoring filters.
     function renderMovies() {
       const grid = document.getElementById('grid');
       grid.innerHTML = '';
@@ -635,7 +635,7 @@
         `Showing ${visibleCount} of ${moviesData.length} movies`;
     }
 
-    // Toggle platform filter
+    // Toggle a streaming platform filter and re-render the grid.
     function togglePlatform(platform) {
       if (selectedPlatforms.has(platform)) {
         selectedPlatforms.delete(platform);
@@ -645,7 +645,7 @@
       renderMovies();
     }
 
-    // Clear all filters
+    // Remove every active streaming filter.
     function clearAllFilters() {
       selectedPlatforms.clear();
       
@@ -657,7 +657,7 @@
       renderMovies();
     }
 
-    // Sort movies
+    // Sort movie cards according to the selected criterion.
     function sortMovies(type) {
       // Update active button
       document.querySelectorAll('.sort-btn').forEach(btn => {
@@ -688,7 +688,7 @@
       renderMovies();
     }
 
-    // Export to Excel
+    // Export the current recommendation data set to an Excel file.
     function exportToExcel() {
       if (!moviesData.length) {
         alert('No data to export');
