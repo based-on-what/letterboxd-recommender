@@ -90,7 +90,7 @@
     let userCountry = 'CL';
     let userCountryName = 'Global';
 
-    // Convert country code to flag emoji
+    // Convert an ISO country code into its flag emoji.
     function countryCodeToFlag(countryCode) {
       const codePoints = countryCode
         .toUpperCase()
@@ -99,7 +99,7 @@
       return String.fromCodePoint(...codePoints);
     }
 
-    // Detect country automatically
+    // Detect the visitor's country to personalize streaming region.
     window.onload = async () => {
       try {
         const res = await fetch('https://ipapi.co/json/');
@@ -113,6 +113,7 @@
       } catch (e) {}
     };
 
+    // Update the on-screen chronometer while recommendations are generated.
     function updateTimer() {
       const diff = new Date() - startTime;
       const m = Math.floor((diff % 3600000) / 60000);
@@ -122,6 +123,7 @@
         `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
     }
 
+    // Kick off the recommendation workflow for a provided username.
     async function startProcess() {
       const username = document.getElementById('username').value.trim();
       if (!username) return alert('Please enter a username');
@@ -177,6 +179,7 @@
       }
     }
 
+    // Redirect to the results page for the current user.
     function navigateToRecommendations() {
       if (window.currentUsername) {
         window.location.href = `/${window.currentUsername}`;
