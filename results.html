@@ -449,6 +449,14 @@
     document.title = `Results for ${username}`;
     document.getElementById('pageTitle').textContent = `For: ${username}`;
 
+    // Format milliseconds to MM:SS display for timer.
+    function formatTime(ms) {
+      const totalSeconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+
     // Convert an ISO country code to its emoji flag for UI display.
     function countryCodeToFlag(countryCode) {
       const codePoints = countryCode
@@ -494,8 +502,16 @@
         }
       }
 
-      // Fetch from API if no cache
+      // Fetch from API if no cache - with live timer
       const start = new Date();
+      let timerInterval = null;
+      
+      // Start live timer display
+      timerInterval = setInterval(() => {
+        const elapsed = new Date() - start;
+        document.getElementById('timerDisplay').textContent = "⏱️ " + formatTime(elapsed);
+      }, 100);
+      
       try {
         const res = await fetch('/api/recommend', {
           method: 'POST',
@@ -512,10 +528,12 @@
         if (!res.ok) throw new Error(data.error);
         
         const timeTaken = new Date() - start;
+        clearInterval(timerInterval);
         render(data);
         document.getElementById('timerDisplay').textContent = "⏱️ " + formatTime(timeTaken);
         
       } catch(e) {
+        clearInterval(timerInterval);
         document.querySelector('.spinner').textContent = "❌ Error";
         document.querySelector('.loading-overlay div:last-child').textContent = e.message;
       } finally {
