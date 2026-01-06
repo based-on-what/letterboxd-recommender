@@ -200,9 +200,9 @@ def make_session():
 session = make_session()
 
 # Rate limiters per service
-tmdb_limiter = RateLimiter(min_interval=0.25)
-letterboxd_limiter = RateLimiter(min_interval=0.35)
-streaming_limiter = RateLimiter(min_interval=0.3)
+tmdb_limiter = RateLimiter(min_interval=0.1)
+letterboxd_limiter = RateLimiter(min_interval=0.15)
+streaming_limiter = RateLimiter(min_interval=0.1)
 
 
 def normalize_title(title):
@@ -697,20 +697,25 @@ class MovieRecommender:
             logger.info(f"  {idx}. {film.get('title')} [{film.get('year')}] - "
                        f"{film.get('user_rating')}★ (TMDB: {film.get('rating_tmdb', 'N/A')})")
         
+        logger.info(f"\nStarting parallel processing of {len(highly_rated_films)} films...")
+        
         logger.info(f"\n=== LOOKING FOR SIMILAR MOVIES ===")
         
         def process_similar(film):
             """Collect similar movies for a given seed title."""
             if not film.get('tmdb_id'):
+                logger.info(f"[SKIP] {film.get('title')} - No TMDB ID")
                 return []
             
-            logger.info(f"Searching movies similar to: {film.get('title')}")
+            logger.info(f"[PROCESSING] {film.get('title')} (TMDB ID: {film.get('tmdb_id')})")
             
             cache_key = f"similar:{film.get('tmdb_id')}"
             
             if not force_refresh:
                 cached = cache.get('similar', cache_key)
                 if cached:
+                    logger.info(f"  [CACHED] {film.get('title')} - Found {len(cached)} results in cache")
+                    return cached
                     logger.info(f"  ↳ Retrieved {len(cached)} from cache")
                     return cached
             
@@ -769,7 +774,7 @@ class MovieRecommender:
                 return []
         
         # Process all highly-rated films in parallel
-        with ThreadPoolExecutor(max_workers=min(6, self.max_workers)) as ex:
+        with ThreadPoolExecutor(max_workers=min(8, self.max_workers)) as ex:
             futures = [ex.submit(process_similar, f) for f in highly_rated_films]
             for f in as_completed(futures):
                 recs.extend(f.result())
@@ -939,7 +944,7 @@ def recommend():
         
         logger.info(f"\nEnriching films with TMDB metadata...")
         with ThreadPoolExecutor(max_workers=8) as ex:
-            futures = [ex.submit(enrich_task, f) for f in user_films[:DEFAULT_MAX_FILMS]]
+            futures = [ex.submit(enrich_task, f) for f in user_films]
             for fut in as_completed(futures):
                 result = fut.result()
                 if result:
@@ -978,6 +983,78 @@ def recommend():
         logger.info(f"\n{'='*60}")
         logger.info(f"ANALYSIS COMPLETE")
         logger.info(f"{'='*60}\n")
+        
+        # Export JSON files locally when in development mode
+        if os.getenv('FLASK_ENV') == 'development' or os.getenv('LOCAL_DEV') == 'true':
+            try:
+                # Export user movies
+                movies_data = {
+                    'username': username,
+                    'export_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'total_movies': len(enriched),
+                    'movies': [
+                        {
+                            'title': f.get('title'),
+                            'original_title': f.get('original_title'),
+                            'year': f.get('year'),
+                            'tmdb_id': f.get('tmdb_id'),
+                            'user_rating': f.get('user_rating'),
+                            'director': f.get('director'),
+                            'genres': f.get('genres', []),
+                            'rating_tmdb': f.get('rating_tmdb'),
+                            'runtime': f.get('runtime')
+                        }
+                        for f in enriched
+                    ]
+                }
+                
+                movies_filename = f"{username}_movies.json"
+                with open(movies_filename, 'w', encoding='utf-8') as f:
+                    json.dump(movies_data, f, ensure_ascii=False, indent=2)
+                logger.info(f"✓ User movies exported to: {movies_filename}")
+                
+                # Build set of already-seen movie IDs for deduplication check
+                seen_ids = {str(m.get('tmdb_id')) for m in enriched if m.get('tmdb_id')}
+                seen_titles_norm = {normalize_title(m.get('title', '')) for m in enriched}
+                
+                # Verify no recommendations are duplicates
+                filtered_recs = []
+                for rec in recommendations:
+                    rec_id = str(rec.get('tmdb_id'))
+                    rec_title_norm = normalize_title(rec.get('title', ''))
+                    
+                    if rec_id not in seen_ids and rec_title_norm not in seen_titles_norm:
+                        filtered_recs.append(rec)
+                
+                # Export recommendations
+                recs_data = {
+                    'username': username,
+                    'export_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'total_recommendations': len(filtered_recs),
+                    'recommendations': [
+                        {
+                            'title': r.get('title'),
+                            'original_title': r.get('original_title'),
+                            'year': r.get('year'),
+                            'tmdb_id': r.get('tmdb_id'),
+                            'rating_tmdb': r.get('rating_tmdb'),
+                            'director': r.get('director'),
+                            'genres': r.get('genres', []),
+                            'runtime': r.get('runtime'),
+                            'streaming': r.get('streaming', [])
+                        }
+                        for r in filtered_recs
+                    ]
+                }
+                
+                recs_filename = f"{username}_recs.json"
+                with open(recs_filename, 'w', encoding='utf-8') as f:
+                    json.dump(recs_data, f, ensure_ascii=False, indent=2)
+                logger.info(f"✓ Recommendations exported to: {recs_filename}")
+                logger.info(f"  (Verified: no duplicates with user's movies)")
+                
+            except Exception as e:
+                logger.warning(f"Could not export JSON files: {e}")
         
         return jsonify({
             'username': username,
