@@ -12,9 +12,9 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      height: 100vh;
+      min-height: 100vh;
       margin: 0;
+      padding: 40px 20px;
     }
     .input-section {
       background: #1e1e1e;
@@ -60,6 +60,99 @@
     .loading-box { display: none; margin-top: 25px; }
     .timer { font-size: 1.5rem; color: #ffbd00; font-weight: bold; margin-bottom: 10px;}
     .status { color: #888; font-size: 0.9rem; }
+    
+    .recommendations-live {
+      margin-top: 40px;
+      width: 100%;
+      max-width: 900px;
+      display: none;
+    }
+    .recommendations-live h2 {
+      color: #00e054;
+      font-size: 1.5rem;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .recommendations-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 20px;
+    }
+    .movie-card {
+      background: #1e1e1e;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .movie-card:hover {
+      transform: translateY(-5px);
+      border-color: #00e054;
+    }
+    .movie-poster {
+      width: 100%;
+      aspect-ratio: 2/3;
+      object-fit: cover;
+      background: #0a0a0a;
+    }
+    .movie-info {
+      padding: 15px;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .title {
+      font-weight: bold;
+      color: #fff;
+      margin-bottom: 5px;
+      font-size: 1rem;
+    }
+    .meta {
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+    .rating {
+      color: #ffbd00;
+      font-weight: bold;
+      margin: 5px 0;
+    }
+    .reason {
+      font-size: 0.8rem;
+      font-style: italic;
+      color: #888;
+      background: rgba(255,255,255,0.05);
+      padding: 5px;
+      border-radius: 4px;
+      margin-top: 5px;
+    }
+    .streaming-sec {
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px dashed #333;
+    }
+    .platform {
+      display: inline-block;
+      background: #00e054;
+      color: #000;
+      font-size: 0.7rem;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin: 2px;
+      font-weight: bold;
+    }
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
   </style>
 </head>
 <body>
@@ -87,11 +180,20 @@
     </div>
   </div>
 
+  <div class="recommendations-live" id="recommendations-live">
+    <h2>🎬 Recommendations Found</h2>
+    <div class="recommendations-grid" id="recommendations-grid"></div>
+  </div>
+
   <script>
     let startTime;
     let timerInterval;
     let userCountry = 'CL';
     let userCountryName = 'Global';
+    let eventSource; // Track EventSource connection
+    let recsEventSource; // Track recommendations EventSource connection
+    let liveRecommendations = []; // Store recommendations shown in real-time
+    let shownMovieIds = new Set(); // Track movie IDs already displayed to prevent duplicates
 
     // Convert an ISO country code into its flag emoji.
     function countryCodeToFlag(countryCode) {
@@ -126,14 +228,154 @@
         `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
     }
 
+    // Connect to SSE logs stream
+    function connectToLogsStream() {
+      if (eventSource) {
+        eventSource.close();
+      }
+      
+      eventSource = new EventSource('/api/logs-stream');
+      
+      eventSource.onmessage = function(event) {
+        if (event.data && event.data !== 'heartbeat') {
+          console.log('[SERVER]', event.data);
+        }
+      };
+      
+      eventSource.onerror = function() {
+        // Connection error - try to reconnect
+        console.warn('[LOGS] Connection lost, will attempt to reconnect...');
+      };
+    }
+
+    // Disconnect from logs stream
+    function disconnectFromLogsStream() {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+    }
+
+    // Connect to recommendations stream
+    function connectToRecommendationsStream() {
+      if (recsEventSource) {
+        recsEventSource.close();
+      }
+      
+      recsEventSource = new EventSource('/api/recommendations-stream');
+      
+      recsEventSource.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.status === 'complete') {
+            recsEventSource.close();
+            recsEventSource = null;
+            return;
+          }
+          
+          // Add recommendation to live display
+          liveRecommendations.push(data);
+          addRecommendationToGrid(data);
+          
+        } catch (e) {
+          console.error('[RECS] Error parsing recommendation:', e);
+        }
+      };
+      
+      recsEventSource.onerror = function() {
+        console.warn('[RECS] Connection lost');
+      };
+    }
+
+    // Disconnect from recommendations stream
+    function disconnectFromRecommendationsStream() {
+      if (recsEventSource) {
+        recsEventSource.close();
+        recsEventSource = null;
+      }
+    }
+
+    // Add a movie card to the live recommendations grid
+    function addRecommendationToGrid(movie) {
+      // Prevenir duplicados
+      const movieId = movie.title + '_' + movie.year;
+      if (shownMovieIds.has(movieId)) {
+        console.log('[DUPLICATE PREVENTED]', movie.title);
+        return;
+      }
+      shownMovieIds.add(movieId);
+      
+      const grid = document.getElementById('recommendations-grid');
+      const liveSection = document.getElementById('recommendations-live');
+      
+      // Show the section if hidden
+      if (liveSection.style.display === 'none') {
+        liveSection.style.display = 'block';
+      }
+      
+      const card = document.createElement('div');
+      card.className = 'movie-card';
+      
+      const posterUrl = movie.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
+      const runtime = movie.runtime ? `${movie.runtime} min` : 'N/A';
+      const director = movie.director || 'Unknown';
+
+      // Prepare streaming HTML identical to results.html
+      let streamingHtml = '';
+      if (movie.streaming && movie.streaming.length > 0) {
+        const platforms = movie.streaming
+          .map(p => `<span class="platform">${p}</span>`)
+          .join('');
+        streamingHtml = `<div class="streaming-sec">${platforms}</div>`;
+      } else {
+        const flagEmoji = countryCodeToFlag(userCountry);
+        streamingHtml = `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">❌ Movie not available on streaming services in ${userCountryName} ${flagEmoji}</div>`;
+      }
+
+      card.innerHTML = `
+        <img src="${posterUrl}" class="movie-poster" loading="lazy" alt="${movie.title}" onerror="this.src='https://via.placeholder.com/300x450?text=No+Poster'">
+        <div class="movie-info">
+          <div class="title">${movie.title}</div>
+          <div class="meta">${movie.year || 'N/A'} • ${director}</div>
+          <div class="meta">⏱️ ${runtime}</div>
+          <div class="rating">⭐ ${movie.rating_tmdb || 'N/A'}</div>
+          <div class="reason">💡 ${movie.reason || 'Recommended for you'}</div>
+          ${streamingHtml}
+        </div>
+      `;
+      
+      grid.appendChild(card);
+    }
+
+    // Clear live recommendations display
+    function clearLiveRecommendations() {
+      const grid = document.getElementById('recommendations-grid');
+      const liveSection = document.getElementById('recommendations-live');
+      
+      grid.innerHTML = '';
+      liveSection.style.display = 'none';
+      liveRecommendations = [];
+      shownMovieIds.clear(); // Limpiar IDs mostrados
+    }
+
     // Kick off the recommendation workflow for a provided username.
     async function startProcess() {
       const username = document.getElementById('username').value.trim();
       if (!username) return alert('Please enter a username');
 
+      // Clear previous results
+      clearLiveRecommendations();
+
       // UI changes
       document.getElementById('btn').disabled = true;
       document.getElementById('loading').style.display = 'block';
+      
+      // Connect to logs stream BEFORE starting the request
+      connectToLogsStream();
+      
+      // Connect to recommendations stream for real-time updates
+      connectToRecommendationsStream();
       
       startTime = new Date();
       timerInterval = setInterval(updateTimer, 50);
@@ -166,6 +408,12 @@
         document.getElementById('loading').style.display = 'none';
         document.getElementById('btn').style.display = 'none';
         
+        // Disconnect from logs stream
+        disconnectFromLogsStream();
+        
+        // Disconnect from recommendations stream
+        disconnectFromRecommendationsStream();
+        
         // Show and configure the recommendations button
         const recBtn = document.getElementById('recommendations-btn');
         recBtn.textContent = `Get ${username}'s recommendations 🎬`;
@@ -178,6 +426,8 @@
         clearInterval(timerInterval);
         document.getElementById('btn').disabled = false;
         document.getElementById('loading').style.display = 'none';
+        disconnectFromLogsStream();
+        disconnectFromRecommendationsStream();
         alert("Error: " + e.message);
       }
     }
@@ -188,6 +438,12 @@
         window.location.href = `/${window.currentUsername}`;
       }
     }
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', function() {
+      disconnectFromLogsStream();
+      disconnectFromRecommendationsStream();
+    });
   </script>
 </body>
 </html>
