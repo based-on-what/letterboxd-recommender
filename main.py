@@ -12,15 +12,40 @@ from threading import Lock
 from dotenv import load_dotenv
 import unicodedata
 import re
+from queue import Queue
+from flask import stream_with_context, Response
 
 load_dotenv()
 
-# Logging configuration
+# Suppress verbose httpx logging
+import logging as py_logging
+py_logging.getLogger('httpx').setLevel(py_logging.WARNING)
+
+# Logging configuration with SSE support
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("letterboxd-recommender")
+
+# Global queue for SSE logs
+log_queue = Queue()
+
+# Global queue for real-time recommendations
+recommendations_queue = Queue()
+
+class QueueHandler(logging.Handler):
+    """Custom handler to send logs to the queue for SSE streaming."""
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            log_queue.put(msg)
+        except Exception:
+            self.handleError(record)
+
+# Add the queue handler to the logger
+queue_handler = QueueHandler()
+logger.addHandler(queue_handler)
 
 # Flask configuration
 app = Flask(__name__, static_folder='.', static_url_path='')
@@ -29,9 +54,6 @@ CORS(app)
 # Configuration variables from the environment
 TMDB_KEY = os.getenv("TMDB_KEY")
 REDIS_URL = os.getenv("REDIS_URL")
-MAX_SCRAPE_PAGES = int(os.getenv("MAX_SCRAPE_PAGES") or 50)
-DEFAULT_MAX_FILMS = int(os.getenv("DEFAULT_MAX_FILMS") or 30)
-DEFAULT_LIMIT_RECS = int(os.getenv("DEFAULT_LIMIT_RECS") or 60)
 MIN_RECOMMEND_RATING = float(os.getenv("MIN_RECOMMEND_RATING", "7.0"))
 
 # Cache TTL constants
@@ -371,8 +393,6 @@ class MovieRecommender:
         if not username:
             return [], 0
         
-        max_pages = max_pages or MAX_SCRAPE_PAGES
-        
         cache_key = f"{username}:pages:v2"
         cached = cache.get('user_scrape', cache_key)
         if cached:
@@ -385,10 +405,6 @@ class MovieRecommender:
             pages = self.get_page_count(username)
             if pages <= 0:
                 return [], 0
-            
-            if pages > max_pages:
-                logger.info(f"Limiting scraping to {max_pages} of {pages} pages")
-                pages = max_pages
             
             rating_map = {f'rated-{i}': i / 2.0 for i in range(1, 11)}
             headers = {'User-Agent': session.headers.get('User-Agent')}
@@ -527,7 +543,7 @@ class MovieRecommender:
                 f"{self.tmdb_base}/movie/{movie_id}",
                 params={
                     'api_key': self.tmdb_key,
-                    'append_to_response': 'credits'
+                    'append_to_response': 'credits,external_ids'
                 },
                 service='tmdb'
             )
@@ -552,7 +568,8 @@ class MovieRecommender:
                 'genres': [g['name'] for g in det.get('genres', [])] if det.get('genres') else [],
                 'poster': f"https://image.tmdb.org/t/p/w500{det.get('poster_path')}" if det.get('poster_path') else None,
                 'rating_tmdb': round(det.get('vote_average', 0), 1) if det.get('vote_average') else None,
-                'runtime': det.get('runtime') or 0
+                'runtime': det.get('runtime') or 0,
+                'imdb_id': (det.get('external_ids') or {}).get('imdb_id')
             }
             
             cache.set('tmdb', key, out, ttl=60 * 60 * 24)
@@ -599,7 +616,7 @@ class MovieRecommender:
             'decades': [f"{d[0]}s" for d in Counter(decades).most_common(3)]
         }
     
-    def get_recommendations(self, enriched_films, count=DEFAULT_LIMIT_RECS, force_refresh=False):
+    def get_recommendations(self, enriched_films, count=None, force_refresh=False):
         """
         Generate recommendations based on the user's films.
 
@@ -611,11 +628,11 @@ class MovieRecommender:
         2. For each, fetch similar titles from TMDB.
         3. Drop duplicates and already-seen titles.
         4. Enforce a minimum TMDB rating threshold.
-        5. Return the best-scoring results.
+        5. Return all matching results.
 
         Args:
             enriched_films: User films enriched with metadata.
-            count: Number of recommendations to return.
+            count: Optional number of recommendations to limit (None = no limit).
             force_refresh: Ignore cache when True.
 
         Returns:
@@ -751,6 +768,11 @@ class MovieRecommender:
                     if not det:
                         continue
                     
+                    # Filtrar inmediatamente por rating TMDB >= 7.0
+                    if det.get('rating_tmdb') is None or float(det.get('rating_tmdb', 0)) < MIN_RECOMMEND_RATING:
+                        logger.debug(f"  ✗ {det.get('title')} - Rating too low ({det.get('rating_tmdb', 'N/A')} < {MIN_RECOMMEND_RATING})")
+                        continue
+                    
                     det_title_norm = normalize_title(det.get('title', ''))
                     det_orig_norm = normalize_title(det.get('original_title', ''))
                     
@@ -761,8 +783,39 @@ class MovieRecommender:
                         continue
                     
                     det['reason'] = f"Since you liked {film.get('title')}"
+                    
+                    # Obtener información de streaming (prioridad TMDB providers por ID)
+                    streaming = []
+                    try:
+                        if det.get('tmdb_id'):
+                            streaming = self.get_streaming_by_tmdb(det.get('tmdb_id'))
+                        if not streaming:
+                            streaming = self.get_streaming(det.get('title'), det.get('year'))
+                    except Exception as e:
+                        logger.debug(f"Could not fetch streaming for {det.get('title')}: {e}")
+                    
+                    # Agregar streaming al objeto det para que se cachee correctamente
+                    det['streaming'] = streaming
+                    
+                    # Ahora sí agregamos a local con streaming incluido
                     local.append(det)
-                    logger.debug(f"  ✓ {det.get('title')} - Valid candidate")
+                    logger.debug(f"  ✓ {det.get('title')} - Valid candidate (rating: {det.get('rating_tmdb')}, streaming: {len(streaming)} providers)")
+                    
+                    # Enviar recomendación en tiempo real CON información de streaming
+                    try:
+                        recommendations_queue.put({
+                            'title': det.get('title'),
+                            'year': det.get('year'),
+                            'rating_tmdb': det.get('rating_tmdb'),
+                            'poster': det.get('poster'),
+                            'director': det.get('director'),
+                            'genres': det.get('genres', []),
+                            'runtime': det.get('runtime', 0),
+                            'streaming': streaming,
+                            'reason': det['reason']
+                        })
+                    except Exception:
+                        pass
                 
                 cache.set('similar', cache_key, local, ttl=60 * 60 * 24)
                 logger.info(f"  ↳ {len(local)} new movies found")
@@ -779,7 +832,7 @@ class MovieRecommender:
             for f in as_completed(futures):
                 recs.extend(f.result())
         
-        # Deduplicate recommendations
+        # Deduplicate recommendations (ya filtradas por rating)
         unique = {}
         for r in recs:
             key = str(r['tmdb_id'])
@@ -790,20 +843,15 @@ class MovieRecommender:
                 r_title_norm not in seen_titles_norm):
                 unique[key] = r
         
-        # Filter by minimum TMDB rating
-        filtered = [
-            v for v in unique.values()
-            if v.get('rating_tmdb') is not None and 
-               float(v['rating_tmdb']) >= MIN_RECOMMEND_RATING
-        ]
+        # Las películas ya vienen filtradas por rating desde process_similar
+        filtered = list(unique.values())
         
         logger.info(f"\n=== FINAL RESULT ===")
-        logger.info(f"Initial candidates: {len(recs)}")
-        logger.info(f"After deduplication: {len(unique)}")
-        logger.info(f"After rating filter (>={MIN_RECOMMEND_RATING}): {len(filtered)}")
-        logger.info(f"Returning top {min(count, len(filtered))}")
+        logger.info(f"Initial candidates (already filtered by rating >={MIN_RECOMMEND_RATING}): {len(recs)}")
+        logger.info(f"After deduplication: {len(filtered)}")
+        logger.info(f"Returning {len(filtered)} recommendations")
         
-        return filtered[:count]
+        return filtered if count is None else filtered[:count]
     
     def get_streaming(self, title, year=None, force_refresh=False):
         """
@@ -840,15 +888,86 @@ class MovieRecommender:
                 cache.set('streaming', cache_key, [], ttl=60 * 60 * 6)
                 return []
             
-            providers = sorted(list(set(
-                o.package.name for o in entries[0].offers if o.package
-            )))
+            # Include all monetization types (flatrate, ads, free, rent, buy)
+            providers_raw = []
+            for o in entries[0].offers:
+                try:
+                    if o.package and getattr(o.package, 'name', None):
+                        providers_raw.append(o.package.name)
+                except Exception:
+                    continue
+
+            # Normalize common provider naming
+            name_map = {
+                'Amazon Prime Video': 'Prime Video',
+                'Prime Video': 'Prime Video',
+                'Disney+': 'Disney Plus',
+                'Disney Plus': 'Disney Plus',
+                'Apple TV+': 'Apple TV+',
+                'HBO Max': 'HBO Max',
+                'Max': 'Max',
+            }
+            providers = sorted(list({ name_map.get(p, p) for p in providers_raw }))
             
             cache.set('streaming', cache_key, providers, ttl=60 * 60 * 6)
             return providers
             
         except Exception as e:
             logger.debug(f"Error fetching streaming for {title}: {e}")
+            cache.set('streaming', cache_key, [], ttl=60 * 60 * 2)
+            return []
+
+    def get_streaming_by_tmdb(self, tmdb_id, force_refresh=False):
+        """
+        Fetch streaming providers using TMDB watch/providers endpoint for exact movie ID.
+
+        Aggregates all monetization types (flatrate, ads, free, rent, buy) for the configured country.
+        """
+        if not self.tmdb_key or not tmdb_id:
+            return []
+
+        cache_key = f"tmdb:{tmdb_id}:{self.country}"
+        if not force_refresh:
+            cached = cache.get('streaming', cache_key)
+            if cached is not None:
+                return cached
+
+        try:
+            url = f"{self.tmdb_base}/movie/{tmdb_id}/watch/providers"
+            resp = self._safe_get(url, params={'api_key': self.tmdb_key}, service='tmdb')
+            if not resp:
+                cache.set('streaming', cache_key, [], ttl=60 * 60 * 2)
+                return []
+
+            data = resp.json() or {}
+            country_data = (data.get('results') or {}).get(self.country)
+            if not country_data:
+                cache.set('streaming', cache_key, [], ttl=60 * 60 * 2)
+                return []
+
+            names = []
+            for k in ('flatrate', 'ads', 'free', 'rent', 'buy'):
+                for p in country_data.get(k, []) or []:
+                    n = p.get('provider_name') or p.get('providerName')
+                    if n:
+                        names.append(n)
+
+            # Normalize and dedupe
+            name_map = {
+                'Amazon Prime Video': 'Prime Video',
+                'Prime Video': 'Prime Video',
+                'Disney+': 'Disney Plus',
+                'Disney Plus': 'Disney Plus',
+                'Apple TV+': 'Apple TV+',
+                'HBO Max': 'HBO Max',
+                'Max': 'Max',
+            }
+            providers = sorted({ name_map.get(n, n) for n in names })
+
+            cache.set('streaming', cache_key, providers, ttl=60 * 60 * 6)
+            return providers
+        except Exception as e:
+            logger.debug(f"Error fetching TMDB providers for {tmdb_id}: {e}")
             cache.set('streaming', cache_key, [], ttl=60 * 60 * 2)
             return []
 
@@ -861,6 +980,69 @@ class MovieRecommender:
 def health():
     """Lightweight health check endpoint for monitoring."""
     return jsonify({"status": "ok"}), 200
+
+
+@app.route('/api/logs-stream', methods=['GET'])
+def logs_stream():
+    """
+    SSE endpoint that streams logs in real-time to the browser.
+    
+    The client connects to this endpoint with EventSource and receives
+    logs as they are generated by the server.
+    """
+    def generate():
+        while True:
+            try:
+                log_msg = log_queue.get(timeout=1)
+                # Format as SSE message
+                yield f"data: {log_msg}\n\n"
+            except:
+                # Keep connection alive with heartbeat
+                yield f": heartbeat\n\n"
+    
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+@app.route('/api/recommendations-stream', methods=['GET'])
+def recommendations_stream():
+    """
+    SSE endpoint that streams recommendations in real-time to the browser.
+    
+    The client connects to this endpoint with EventSource and receives
+    recommendations as they are found and approved.
+    """
+    def generate():
+        try:
+            while True:
+                try:
+                    rec = recommendations_queue.get(timeout=2)
+                    if rec == 'DONE':
+                        yield f"data: {{\"status\": \"complete\"}}\n\n"
+                        break
+                    yield f"data: {json.dumps(rec)}\n\n"
+                except:
+                    # Keep connection alive with heartbeat
+                    yield f": heartbeat\n\n"
+        except Exception:
+            pass
+    
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
 
 
 @app.route("/")
@@ -958,24 +1140,22 @@ def recommend():
         logger.info(f"  Decades: {', '.join(preferences.get('decades', []))}")
         
         # Generate recommendations
-        recommendations = rec_sys.get_recommendations(enriched, count=DEFAULT_LIMIT_RECS)
+        recommendations = rec_sys.get_recommendations(enriched)
         
         # Retrieve streaming information if requested
         if data.get('include_streaming', True) and recommendations:
-            logger.info(f"\nFetching streaming availability...")
-            
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                future_map = {
-                    ex.submit(rec_sys.get_streaming, r['title'], r.get('year')): r
-                    for r in recommendations
-                }
-                
-                for fut in as_completed(future_map):
+            # Streaming info ya fue obtenida en tiempo real durante el procesamiento
+            # Aquí solo nos aseguramos de que cada recomendación tenga el campo usando TMDB ID
+            for r in recommendations:
+                if not r.get('streaming'):
                     try:
-                        future_map[fut]['streaming'] = fut.result() or []
+                        if r.get('tmdb_id'):
+                            r['streaming'] = rec_sys.get_streaming_by_tmdb(r.get('tmdb_id')) or []
+                        if not r.get('streaming'):
+                            r['streaming'] = rec_sys.get_streaming(r.get('title'), r.get('year')) or []
                     except Exception as e:
                         logger.debug(f"Error fetching streaming data: {e}")
-                        future_map[fut]['streaming'] = []
+                        r['streaming'] = []
         else:
             for r in recommendations:
                 r['streaming'] = []
@@ -983,6 +1163,12 @@ def recommend():
         logger.info(f"\n{'='*60}")
         logger.info(f"ANALYSIS COMPLETE")
         logger.info(f"{'='*60}\n")
+        
+        # Enviar señal de finalización para el stream de recomendaciones
+        try:
+            recommendations_queue.put('DONE')
+        except Exception:
+            pass
         
         # Export JSON files locally when in development mode
         if os.getenv('FLASK_ENV') == 'development' or os.getenv('LOCAL_DEV') == 'true':
