@@ -214,8 +214,9 @@ def make_session():
         backoff_factor=0.5,
         status_forcelist=(429, 500, 502, 503, 504)
     )
-    s.mount("https://", HTTPAdapter(max_retries=retries))
-    s.mount("http://", HTTPAdapter(max_retries=retries))
+    adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
     s.headers.update({"User-Agent": "Letterboxd-Recommender/1.0"})
     return s
 
@@ -680,6 +681,12 @@ class MovieRecommender:
         logger.info(f"\n=== 4+ STAR FILMS USED FOR RECOMMENDATIONS ===")
         logger.info(f"Total films with 4+ stars: {len(highly_rated_films)}")
         
+        # Limitar el número de películas a procesar para evitar timeouts
+        MAX_FILMS_TO_PROCESS = 100
+        if len(highly_rated_films) > MAX_FILMS_TO_PROCESS:
+            logger.info(f"Limiting to top {MAX_FILMS_TO_PROCESS} highest-rated films to prevent timeout")
+            highly_rated_films = highly_rated_films[:MAX_FILMS_TO_PROCESS]
+        
         # Export JSON locally for development debugging
         if os.getenv('FLASK_ENV') == 'development' or os.getenv('LOCAL_DEV') == 'true':
             try:
@@ -827,7 +834,8 @@ class MovieRecommender:
                 return []
         
         # Process all highly-rated films in parallel
-        with ThreadPoolExecutor(max_workers=min(8, self.max_workers)) as ex:
+        # Reducir workers para evitar rate limiting y timeouts
+        with ThreadPoolExecutor(max_workers=min(4, self.max_workers)) as ex:
             futures = [ex.submit(process_similar, f) for f in highly_rated_films]
             for f in as_completed(futures):
                 recs.extend(f.result())
@@ -1086,6 +1094,7 @@ def recommend():
         - preferences: {genres, directors, decades}
         - recommendations: [{title, year, rating, streaming, ...}]
     """
+    start_time = time.time()
     data = request.get_json() or {}
     username = data.get('username')
     
@@ -1101,46 +1110,71 @@ def recommend():
         
         # Fetch user films (including unrated entries)
         user_films, pages = rec_sys.get_all_rated_films(username, include_unrated=True)
+        logger.info(f"Fetched {len(user_films)} films in {time.time() - start_time:.2f}s")
         
         if not user_films:
             return jsonify({'error': 'No movies found'}), 404
+        
+        # Limitar el procesamiento para evitar timeouts en producción
+        # Solo procesar las primeras 500 películas más importantes (las mejor calificadas)
+        if len(user_films) > 500:
+            logger.info(f"Limiting processing: {len(user_films)} films -> 500 (keeping highest rated)")
+            # Ordenar por rating y quedarse con las mejores 500
+            user_films_sorted = sorted(user_films, key=lambda x: x.get('rating', 0), reverse=True)
+            user_films = user_films_sorted[:500]
         
         # Enrich with TMDB data
         enriched = []
         
         def enrich_task(film):
             """Augment a scraped film with TMDB data."""
-            tmdb_data = rec_sys.get_tmdb_details(film['title'])
-            
-            if tmdb_data:
-                tmdb_data['user_rating'] = film.get('rating', 0)
-                return tmdb_data
-            
-            return {
-                'tmdb_id': None,
-                'title': film['title'],
-                'user_rating': film.get('rating', 0),
-                'genres': [],
-                'director': None
-            }
+            try:
+                tmdb_data = rec_sys.get_tmdb_details(film['title'])
+                
+                if tmdb_data:
+                    tmdb_data['user_rating'] = film.get('rating', 0)
+                    return tmdb_data
+                
+                return {
+                    'tmdb_id': None,
+                    'title': film['title'],
+                    'user_rating': film.get('rating', 0),
+                    'genres': [],
+                    'director': None
+                }
+            except Exception as e:
+                logger.debug(f"Error enriching {film.get('title', 'Unknown')}: {e}")
+                return None
         
-        logger.info(f"\nEnriching films with TMDB metadata...")
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        logger.info(f"\nEnriching {len(user_films)} films with TMDB metadata...")
+        enrich_start = time.time()
+        with ThreadPoolExecutor(max_workers=6) as ex:
             futures = [ex.submit(enrich_task, f) for f in user_films]
             for fut in as_completed(futures):
                 result = fut.result()
                 if result:
                     enriched.append(result)
+        logger.info(f"Enrichment completed in {time.time() - enrich_start:.2f}s")
         
         # Analyze preferences
+        pref_start = time.time()
         preferences = rec_sys.analyze_preferences(enriched)
-        logger.info(f"\nPreferences detected:")
+        logger.info(f"\nPreferences detected in {time.time() - pref_start:.2f}s:")
         logger.info(f"  Genres: {', '.join(preferences.get('genres', []))}")
         logger.info(f"  Directors: {', '.join(preferences.get('directors', []))}")
         logger.info(f"  Decades: {', '.join(preferences.get('decades', []))}")
         
+        # Verificar tiempo transcurrido y ajustar procesamiento
+        elapsed = time.time() - start_time
+        logger.info(f"\nTime elapsed so far: {elapsed:.2f}s")
+        
+        if elapsed > 240:  # Si ya pasaron 4 minutos
+            logger.warning("Approaching timeout limit, limiting recommendation processing")
+        
         # Generate recommendations
+        rec_start = time.time()
         recommendations = rec_sys.get_recommendations(enriched)
+        logger.info(f"Recommendations generated in {time.time() - rec_start:.2f}s")
         
         # Retrieve streaming information if requested
         if data.get('include_streaming', True) and recommendations:
@@ -1162,6 +1196,7 @@ def recommend():
         
         logger.info(f"\n{'='*60}")
         logger.info(f"ANALYSIS COMPLETE")
+        logger.info(f"Total processing time: {time.time() - start_time:.2f}s")
         logger.info(f"{'='*60}\n")
         
         # Enviar señal de finalización para el stream de recomendaciones
@@ -1252,7 +1287,12 @@ def recommend():
         
     except Exception as e:
         logger.exception("Error generando recomendaciones")
-        return jsonify({'error': str(e)}), 500
+        elapsed = time.time() - start_time if 'start_time' in locals() else 0
+        return jsonify({
+            'error': str(e),
+            'elapsed_time': elapsed,
+            'message': 'An error occurred while generating recommendations'
+        }), 500
 
 
 @app.route('/<username>')
