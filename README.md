@@ -1,6 +1,6 @@
 # 🎬 Letterboxd Recommender
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-3.0+-green.svg)](https://flask.palletsprojects.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Live Demo](https://img.shields.io/badge/Demo-Live-success.svg)](https://letterboxd-recommender-production.up.railway.app/)
@@ -60,7 +60,7 @@ The recommendation engine follows a sophisticated multi-step pipeline:
 ## 🛠️ Tech Stack
 
 ### Backend
-- **[Python 3.11+](https://www.python.org/)**: Core application language
+- **[Python 3.10+](https://www.python.org/)**: Core application language
 - **[Flask](https://flask.palletsprojects.com/)**: Lightweight web framework with CORS support
 - **[BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/)**: HTML parsing for Letterboxd scraping
 - **[Requests](https://requests.readthedocs.io/)**: HTTP library with retry logic
@@ -90,7 +90,7 @@ The recommendation engine follows a sophisticated multi-step pipeline:
 
 Before installing, ensure you have:
 
-- **Python 3.11 or higher** ([Download](https://www.python.org/downloads/))
+- **Python 3.10 or higher** ([Download](https://www.python.org/downloads/))
 - **pip** (Python package manager, included with Python)
 - **TMDB API Key** ([Get one free here](https://www.themoviedb.org/settings/api))
 - **(Optional) Redis** for distributed caching ([Installation guide](https://redis.io/docs/getting-started/installation/))
