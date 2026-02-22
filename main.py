@@ -340,7 +340,7 @@ cache = Cache()
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-def make_session():
+def make_session(trust_env=False):
     """
     Build an HTTP session with retry support.
 
@@ -348,7 +348,7 @@ def make_session():
     failures and rate limiting responses.
     """
     s = requests.Session()
-    s.trust_env = False
+    s.trust_env = trust_env
     retries = Retry(
         total=3,
         backoff_factor=0.5,
@@ -360,8 +360,20 @@ def make_session():
     s.headers.update({"User-Agent": DEFAULT_USER_AGENT})
     return s
 
-session = make_session()
+session = make_session(trust_env=False)
+proxy_session = make_session(trust_env=True)
 cloudscraper_session = cloudscraper.create_scraper() if cloudscraper else None
+
+def _request_with_fallback(http_session, url, params, headers, timeout, service):
+    """Send GET request with optional proxy-session fallback for Letterboxd."""
+    try:
+        return http_session.get(url, params=params, headers=headers, timeout=timeout)
+    except requests.RequestException as exc:
+        if service == 'letterboxd':
+            logger.debug(f"Direct Letterboxd request failed, trying proxy-enabled session: {exc}")
+            return proxy_session.get(url, params=params, headers=headers, timeout=timeout)
+        raise
+
 
 # Rate limiters per service
 tmdb_limiter = RateLimiter(min_interval=0.1)
@@ -468,7 +480,7 @@ class MovieRecommender:
                 if headers:
                     merged_headers.update(headers)
 
-                r = session.get(url, params=params, headers=merged_headers, timeout=12)
+                r = _request_with_fallback(session, url, params, merged_headers, 12, service)
 
                 if r.status_code == 200:
                     return r
@@ -479,7 +491,7 @@ class MovieRecommender:
                         if alt.status_code == 200:
                             logger.info("Letterboxd request succeeded via cloudscraper fallback")
                             return alt
-                        logger.debug(
+                        logger.warning(
                             f"Cloudscraper non-200 response ({alt.status_code}) from {url} on attempt {attempt + 1}"
                         )
                     except requests.RequestException as exc:
@@ -490,18 +502,23 @@ class MovieRecommender:
                     logger.warning(f"Rate limit reached, waiting {sleep_time}s")
                     time.sleep(sleep_time)
                 else:
-                    logger.debug(
+                    logger.warning(
                         f"Non-200 response ({r.status_code}) from {url} on attempt {attempt + 1}"
                     )
                     time.sleep(0.4)
                     
             except requests.RequestException as e:
-                logger.debug(f"Request error (attempt {attempt + 1}): {e}")
+                logger.warning(f"Request error for {url} (attempt {attempt + 1}): {type(e).__name__}: {e}")
                 time.sleep(0.4 * (attempt + 1))
         
         logger.warning(f"Failed after {max_retries + 1} attempts: {url}")
         if service == 'letterboxd':
-            logger.warning('Letterboxd scraping failed; verify network/proxy settings and anti-bot restrictions.')
+            logger.warning(
+                "Letterboxd scraping failed after retries. "
+                f"cloudscraper_available={cloudscraper_session is not None}, "
+                f"proxy_env_http={bool(os.getenv('HTTP_PROXY') or os.getenv('http_proxy'))}, "
+                f"proxy_env_https={bool(os.getenv('HTTPS_PROXY') or os.getenv('https_proxy'))}"
+            )
         return None
     
     def get_page_count(self, username):
@@ -1300,6 +1317,7 @@ def recommend():
                 'error': 'No movies found. Profile may be private/unavailable or Letterboxd blocked the request.',
                 'username': username,
                 'request_id': request_id,
+                'hint': 'Check backend logs for Letterboxd HTTP status / proxy diagnostics.',
             }), 404
         
         # Limit processing to avoid production timeouts
