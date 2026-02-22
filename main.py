@@ -443,6 +443,7 @@ class MovieRecommender:
         self.tmdb_key = TMDB_KEY
         self.country = country.upper()
         self.max_workers = max_workers
+        self._tmdb_auth_warning_emitted = False
         
         self.country_names = {
             'CL': 'Chile', 'AR': 'Argentina', 'MX': 'Mexico', 'US': 'United States',
@@ -451,6 +452,35 @@ class MovieRecommender:
             'GB': 'United Kingdom'
         }
     
+
+    def _tmdb_auth_parts(self):
+        """Return params/headers tuple for TMDB auth supporting v3 and v4 keys."""
+        token = (self.tmdb_key or '').strip()
+        if token.startswith('eyJ'):
+            return {}, {'Authorization': f'Bearer {token}'}
+        return {'api_key': token}, {}
+
+    def _tmdb_get(self, path, params=None):
+        """Issue a TMDB GET request with automatic auth and 401 diagnostics."""
+        auth_params, auth_headers = self._tmdb_auth_parts()
+        req_params = dict(params or {})
+        req_params.update(auth_params)
+        req_headers = dict(auth_headers)
+
+        resp = self._safe_get(
+            f"{self.tmdb_base}{path}",
+            params=req_params,
+            headers=req_headers or None,
+            service='tmdb'
+        )
+
+        if not resp and not self._tmdb_auth_warning_emitted:
+            self._tmdb_auth_warning_emitted = True
+            logger.warning(
+                'TMDB request failed. Verify TMDB_KEY format: v3 API key uses api_key param; v4 token uses Bearer auth.'
+            )
+        return resp
+
     def get_country_name(self):
         """Return the human-friendly name for the configured country."""
         return self.country_names.get(self.country, self.country)
@@ -684,12 +714,7 @@ class MovieRecommender:
                 return cached
         
         try:
-            resp = self._safe_get(
-                f"{self.tmdb_base}/search/movie",
-                params={'query': title},
-                headers={'Authorization': f'Bearer {self.tmdb_key}'},
-                service='tmdb'
-            )
+            resp = self._tmdb_get('/search/movie', params={'query': title})
             
             if not resp:
                 return None
@@ -727,11 +752,9 @@ class MovieRecommender:
                 return cached
         
         try:
-            resp = self._safe_get(
-                f"{self.tmdb_base}/movie/{movie_id}",
-                params={'append_to_response': 'credits,external_ids'},
-                headers={'Authorization': f'Bearer {self.tmdb_key}'},
-                service='tmdb'
+            resp = self._tmdb_get(
+                f'/movie/{movie_id}',
+                params={'append_to_response': 'credits,external_ids'}
             )
             
             if not resp:
@@ -925,8 +948,7 @@ class MovieRecommender:
                     return cached
             
             try:
-                url = f"{self.tmdb_base}/movie/{film['tmdb_id']}/similar"
-                resp = self._safe_get(url, headers={'Authorization': f'Bearer {self.tmdb_key}'}, service='tmdb')
+                resp = self._tmdb_get(f"/movie/{film['tmdb_id']}/similar")
                 
                 if not resp:
                     return []
@@ -1115,8 +1137,7 @@ class MovieRecommender:
                 return cached
 
         try:
-            url = f"{self.tmdb_base}/movie/{tmdb_id}/watch/providers"
-            resp = self._safe_get(url, headers={'Authorization': f'Bearer {self.tmdb_key}'}, service='tmdb')
+            resp = self._tmdb_get(f"/movie/{tmdb_id}/watch/providers")
             if not resp:
                 cache.set('streaming', cache_key, [], ttl=TWO_HOURS)
                 return []
