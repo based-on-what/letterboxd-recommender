@@ -60,10 +60,16 @@ DEFAULT_USER_AGENT = (
     '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 )
 LETTERBOXD_HEADERS = {
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9,es;q=0.8',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'DNT': '1',
 }
 
 PROVIDER_NAME_MAP = {
@@ -236,6 +242,11 @@ try:
 except ImportError:
     cloudscraper = None
 
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:
+    curl_requests = None
+
 
 # === CACHE ===
 
@@ -375,6 +386,23 @@ def _request_with_fallback(http_session, url, params, headers, timeout, service)
         raise
 
 
+def _curl_letterboxd_get(url, params, headers, timeout):
+    """Optional high-fidelity browser impersonation fallback for Letterboxd."""
+    if curl_requests is None:
+        return None
+    try:
+        return curl_requests.get(
+            url,
+            params=params,
+            headers=headers,
+            timeout=timeout,
+            impersonate='chrome120',
+        )
+    except Exception as exc:
+        logger.debug(f"curl_cffi fallback error: {exc}")
+        return None
+
+
 # Rate limiters per service
 tmdb_limiter = RateLimiter(min_interval=0.1)
 letterboxd_limiter = RateLimiter(min_interval=0.15)
@@ -444,6 +472,7 @@ class MovieRecommender:
         self.country = country.upper()
         self.max_workers = max_workers
         self._tmdb_auth_warning_emitted = False
+        self._letterboxd_last_failures = []
         
         self.country_names = {
             'CL': 'Chile', 'AR': 'Argentina', 'MX': 'Mexico', 'US': 'United States',
@@ -504,6 +533,9 @@ class MovieRecommender:
         if limiter:
             limiter.wait()
         
+        if service == 'letterboxd':
+            self._letterboxd_last_failures = []
+
         for attempt in range(max_retries + 1):
             try:
                 merged_headers = dict(session.headers)
@@ -515,17 +547,34 @@ class MovieRecommender:
                 if r.status_code == 200:
                     return r
 
-                if service == 'letterboxd' and cloudscraper_session is not None and r.status_code in (403, 429, 503):
-                    try:
-                        alt = cloudscraper_session.get(url, params=params, headers=merged_headers, timeout=12)
-                        if alt.status_code == 200:
-                            logger.info("Letterboxd request succeeded via cloudscraper fallback")
-                            return alt
-                        logger.warning(
-                            f"Cloudscraper non-200 response ({alt.status_code}) from {url} on attempt {attempt + 1}"
+                if service == 'letterboxd' and r.status_code in (403, 429, 503):
+                    self._letterboxd_last_failures.append(f"attempt={attempt + 1},status={r.status_code},source=requests")
+                    if cloudscraper_session is not None:
+                        try:
+                            alt = cloudscraper_session.get(url, params=params, headers=merged_headers, timeout=12)
+                            if alt.status_code == 200:
+                                logger.info("Letterboxd request succeeded via cloudscraper fallback")
+                                return alt
+                            self._letterboxd_last_failures.append(
+                                f"attempt={attempt + 1},status={alt.status_code},source=cloudscraper"
+                            )
+                            logger.warning(
+                                f"Cloudscraper non-200 response ({alt.status_code}) from {url} on attempt {attempt + 1}"
+                            )
+                        except requests.RequestException as exc:
+                            self._letterboxd_last_failures.append(
+                                f"attempt={attempt + 1},error={type(exc).__name__},source=cloudscraper"
+                            )
+                            logger.debug(f"Cloudscraper request error (attempt {attempt + 1}): {exc}")
+
+                    curl_resp = _curl_letterboxd_get(url, params, merged_headers, 12)
+                    if curl_resp is not None:
+                        if getattr(curl_resp, 'status_code', None) == 200:
+                            logger.info("Letterboxd request succeeded via curl_cffi fallback")
+                            return curl_resp
+                        self._letterboxd_last_failures.append(
+                            f"attempt={attempt + 1},status={getattr(curl_resp, 'status_code', 'n/a')},source=curl_cffi"
                         )
-                    except requests.RequestException as exc:
-                        logger.debug(f"Cloudscraper request error (attempt {attempt + 1}): {exc}")
 
                 if r.status_code == 429:
                     sleep_time = (attempt + 1) * 1.5
@@ -538,6 +587,10 @@ class MovieRecommender:
                     time.sleep(0.4)
                     
             except requests.RequestException as e:
+                if service == 'letterboxd':
+                    self._letterboxd_last_failures.append(
+                        f"attempt={attempt + 1},error={type(e).__name__},source=requests"
+                    )
                 logger.warning(f"Request error for {url} (attempt {attempt + 1}): {type(e).__name__}: {e}")
                 time.sleep(0.4 * (attempt + 1))
         
@@ -547,7 +600,8 @@ class MovieRecommender:
                 "Letterboxd scraping failed after retries. "
                 f"cloudscraper_available={cloudscraper_session is not None}, "
                 f"proxy_env_http={bool(os.getenv('HTTP_PROXY') or os.getenv('http_proxy'))}, "
-                f"proxy_env_https={bool(os.getenv('HTTPS_PROXY') or os.getenv('https_proxy'))}"
+                f"proxy_env_https={bool(os.getenv('HTTPS_PROXY') or os.getenv('https_proxy'))}, "
+                f"last_failures={self._letterboxd_last_failures}"
             )
         return None
     
@@ -1339,6 +1393,7 @@ def recommend():
                 'username': username,
                 'request_id': request_id,
                 'hint': 'Check backend logs for Letterboxd HTTP status / proxy diagnostics.',
+                'letterboxd_failures': rec_sys._letterboxd_last_failures[-8:],
             }), 404
         
         # Limit processing to avoid production timeouts
