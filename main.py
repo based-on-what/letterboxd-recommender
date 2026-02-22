@@ -41,6 +41,7 @@ logger = logging.getLogger("letterboxd-recommender")
 
 # === CONSTANTS ===
 IS_DEV = os.getenv('FLASK_ENV') == 'development' or os.getenv('LOCAL_DEV') == 'true'
+RATE_LIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
 
 ONE_MONTH = 60 * 60 * 24 * 30
 ONE_WEEK = 60 * 60 * 24 * 7
@@ -73,7 +74,13 @@ def _get_or_create_streams(request_id):
     with REQUEST_STREAMS_LOCK:
         streams = REQUEST_STREAMS.get(request_id)
         if streams is None:
-            streams = {'logs': Queue(), 'recommendations': Queue()}
+            streams = {
+                'logs': Queue(),
+                'recommendations': Queue(),
+                'logs_connected': 0,
+                'recommendations_connected': 0,
+                'recommendations_done': False,
+            }
             REQUEST_STREAMS[request_id] = streams
         return streams
 
@@ -81,6 +88,33 @@ def _get_or_create_streams(request_id):
 def _cleanup_request_streams(request_id):
     with REQUEST_STREAMS_LOCK:
         REQUEST_STREAMS.pop(request_id, None)
+
+
+
+
+def _mark_recommendations_done(request_id):
+    with REQUEST_STREAMS_LOCK:
+        streams = REQUEST_STREAMS.get(request_id)
+        if streams:
+            streams['recommendations_done'] = True
+
+
+def _track_stream_connection(request_id, stream_name, connected):
+    with REQUEST_STREAMS_LOCK:
+        streams = REQUEST_STREAMS.get(request_id)
+        if not streams:
+            return
+
+        counter_key = f"{stream_name}_connected"
+        current = streams.get(counter_key, 0)
+        streams[counter_key] = max(0, current + (1 if connected else -1))
+
+        if (
+            streams.get('recommendations_done')
+            and streams.get('logs_connected', 0) == 0
+            and streams.get('recommendations_connected', 0) == 0
+        ):
+            REQUEST_STREAMS.pop(request_id, None)
 
 
 def _export_debug_json(filename, data):
@@ -121,6 +155,7 @@ if Limiter is not None:
         get_remote_address,
         app=app,
         default_limits=[],
+        storage_uri=RATE_LIMIT_STORAGE_URI,
     )
 else:
     logger.warning('flask-limiter unavailable; endpoint rate limiting disabled')
@@ -1098,6 +1133,7 @@ def logs_stream():
     log_queue = _get_or_create_streams(request_id)['logs']
 
     def generate():
+        _track_stream_connection(request_id, 'logs', True)
         try:
             while True:
                 try:
@@ -1106,7 +1142,7 @@ def logs_stream():
                 except queue.Empty:
                     yield ": heartbeat\n\n"
         finally:
-            _cleanup_request_streams(request_id)
+            _track_stream_connection(request_id, 'logs', False)
 
     return Response(
         stream_with_context(generate()),
@@ -1129,6 +1165,7 @@ def recommendations_stream():
     recommendations_queue = _get_or_create_streams(request_id)['recommendations']
 
     def generate():
+        _track_stream_connection(request_id, 'recommendations', True)
         try:
             while True:
                 try:
@@ -1142,7 +1179,7 @@ def recommendations_stream():
         except Exception as exc:
             logger.debug(f"Recommendations stream ended for {request_id}: {exc}")
         finally:
-            _cleanup_request_streams(request_id)
+            _track_stream_connection(request_id, 'recommendations', False)
 
     return Response(
         stream_with_context(generate()),
@@ -1290,6 +1327,7 @@ def recommend():
         
         # Send completion signal for recommendation stream
         try:
+            _mark_recommendations_done(request_id)
             _get_or_create_streams(request_id)['recommendations'].put('DONE')
         except Exception:
             pass
