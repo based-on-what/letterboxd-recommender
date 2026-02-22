@@ -231,6 +231,11 @@ except ImportError:
     sjw = None
     logger.warning("simplejustwatchapi unavailable; streaming fallback disabled")
 
+try:
+    import cloudscraper
+except ImportError:
+    cloudscraper = None
+
 
 # === CACHE ===
 
@@ -343,6 +348,7 @@ def make_session():
     failures and rate limiting responses.
     """
     s = requests.Session()
+    s.trust_env = False
     retries = Retry(
         total=3,
         backoff_factor=0.5,
@@ -355,6 +361,7 @@ def make_session():
     return s
 
 session = make_session()
+cloudscraper_session = cloudscraper.create_scraper() if cloudscraper else None
 
 # Rate limiters per service
 tmdb_limiter = RateLimiter(min_interval=0.1)
@@ -465,7 +472,20 @@ class MovieRecommender:
 
                 if r.status_code == 200:
                     return r
-                elif r.status_code == 429:
+
+                if service == 'letterboxd' and cloudscraper_session is not None and r.status_code in (403, 429, 503):
+                    try:
+                        alt = cloudscraper_session.get(url, params=params, headers=merged_headers, timeout=12)
+                        if alt.status_code == 200:
+                            logger.info("Letterboxd request succeeded via cloudscraper fallback")
+                            return alt
+                        logger.debug(
+                            f"Cloudscraper non-200 response ({alt.status_code}) from {url} on attempt {attempt + 1}"
+                        )
+                    except requests.RequestException as exc:
+                        logger.debug(f"Cloudscraper request error (attempt {attempt + 1}): {exc}")
+
+                if r.status_code == 429:
                     sleep_time = (attempt + 1) * 1.5
                     logger.warning(f"Rate limit reached, waiting {sleep_time}s")
                     time.sleep(sleep_time)
@@ -480,6 +500,8 @@ class MovieRecommender:
                 time.sleep(0.4 * (attempt + 1))
         
         logger.warning(f"Failed after {max_retries + 1} attempts: {url}")
+        if service == 'letterboxd':
+            logger.warning('Letterboxd scraping failed; verify network/proxy settings and anti-bot restrictions.')
         return None
     
     def get_page_count(self, username):
