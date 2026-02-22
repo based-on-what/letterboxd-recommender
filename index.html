@@ -192,6 +192,7 @@
     let userCountryName = 'Global';
     let eventSource; // Track EventSource connection
     let recsEventSource; // Track recommendations EventSource connection
+    let activeRequestId = null;
     let liveRecommendations = []; // Store recommendations shown in real-time
     let shownMovieIds = new Set(); // Track movie IDs already displayed to prevent duplicates
 
@@ -229,12 +230,12 @@
     }
 
     // Connect to SSE logs stream
-    function connectToLogsStream() {
+    function connectToLogsStream(requestId) {
       if (eventSource) {
         eventSource.close();
       }
       
-      eventSource = new EventSource('/api/logs-stream');
+      eventSource = new EventSource(`/api/logs-stream?request_id=${encodeURIComponent(requestId)}`);
       
       eventSource.onmessage = function(event) {
         if (event.data && event.data !== 'heartbeat') {
@@ -257,12 +258,12 @@
     }
 
     // Connect to recommendations stream
-    function connectToRecommendationsStream() {
+    function connectToRecommendationsStream(requestId) {
       if (recsEventSource) {
         recsEventSource.close();
       }
       
-      recsEventSource = new EventSource('/api/recommendations-stream');
+      recsEventSource = new EventSource(`/api/recommendations-stream?request_id=${encodeURIComponent(requestId)}`);
       
       recsEventSource.onmessage = function(event) {
         try {
@@ -298,7 +299,7 @@
 
     // Add a movie card to the live recommendations grid
     function addRecommendationToGrid(movie) {
-      // Prevenir duplicados
+      // Prevent duplicates
       const movieId = movie.title + '_' + movie.year;
       if (shownMovieIds.has(movieId)) {
         console.log('[DUPLICATE PREVENTED]', movie.title);
@@ -356,7 +357,7 @@
       grid.innerHTML = '';
       liveSection.style.display = 'none';
       liveRecommendations = [];
-      shownMovieIds.clear(); // Limpiar IDs mostrados
+      shownMovieIds.clear(); // Clear displayed IDs
     }
 
     // Kick off the recommendation workflow for a provided username.
@@ -371,11 +372,13 @@
       document.getElementById('btn').disabled = true;
       document.getElementById('loading').style.display = 'block';
       
+      activeRequestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
       // Connect to logs stream BEFORE starting the request
-      connectToLogsStream();
+      connectToLogsStream(activeRequestId);
       
       // Connect to recommendations stream for real-time updates
-      connectToRecommendationsStream();
+      connectToRecommendationsStream(activeRequestId);
       
       startTime = new Date();
       timerInterval = setInterval(updateTimer, 50);
@@ -385,11 +388,14 @@
         const response = await fetch('/api/recommend', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({username, country: userCountry})
+          body: JSON.stringify({username, country: userCountry, request_id: activeRequestId})
         });
         
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Unknown error');
+        if (data.request_id) {
+          activeRequestId = data.request_id;
+        }
 
         const endTime = new Date();
         const totalTime = endTime - startTime;
