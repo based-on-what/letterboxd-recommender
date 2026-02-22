@@ -55,6 +55,16 @@ TIMEOUT_WARNING_S = 240
 ENRICH_WORKERS = 6
 SIMILAR_WORKERS = 4
 SIMILAR_RESULTS_PER_FILM = 12
+DEFAULT_USER_AGENT = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+)
+LETTERBOXD_HEADERS = {
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+}
 
 PROVIDER_NAME_MAP = {
     'Amazon Prime Video': 'Prime Video',
@@ -341,7 +351,7 @@ def make_session():
     adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
     s.mount("https://", adapter)
     s.mount("http://", adapter)
-    s.headers.update({"User-Agent": "Letterboxd-Recommender/1.0"})
+    s.headers.update({"User-Agent": DEFAULT_USER_AGENT})
     return s
 
 session = make_session()
@@ -447,8 +457,12 @@ class MovieRecommender:
         
         for attempt in range(max_retries + 1):
             try:
-                r = session.get(url, params=params, headers=headers, timeout=12)
-                
+                merged_headers = dict(session.headers)
+                if headers:
+                    merged_headers.update(headers)
+
+                r = session.get(url, params=params, headers=merged_headers, timeout=12)
+
                 if r.status_code == 200:
                     return r
                 elif r.status_code == 429:
@@ -456,6 +470,9 @@ class MovieRecommender:
                     logger.warning(f"Rate limit reached, waiting {sleep_time}s")
                     time.sleep(sleep_time)
                 else:
+                    logger.debug(
+                        f"Non-200 response ({r.status_code}) from {url} on attempt {attempt + 1}"
+                    )
                     time.sleep(0.4)
                     
             except requests.RequestException as e:
@@ -478,7 +495,7 @@ class MovieRecommender:
         url = f"{self.letterboxd_base}/{username}/films/"
         
         try:
-            r = self._safe_get(url, service='letterboxd')
+            r = self._safe_get(url, headers=LETTERBOXD_HEADERS, service='letterboxd')
             if not r:
                 return 0
             
@@ -535,7 +552,7 @@ class MovieRecommender:
                 return [], 0
             
             rating_map = {f'rated-{i}': i / 2.0 for i in range(1, 11)}
-            headers = {'User-Agent': session.headers.get('User-Agent')}
+            headers = dict(LETTERBOXD_HEADERS)
             
             def scrape_page(page):
                 """Scrape a single profile page."""
@@ -1257,7 +1274,11 @@ def recommend():
         logger.info(f"Fetched {len(user_films)} films in {time.time() - start_time:.2f}s")
         
         if not user_films:
-            return jsonify({'error': 'No movies found'}), 404
+            return jsonify({
+                'error': 'No movies found. Profile may be private/unavailable or Letterboxd blocked the request.',
+                'username': username,
+                'request_id': request_id,
+            }), 404
         
         # Limit processing to avoid production timeouts
         if len(user_films) > MAX_FILMS_TO_ENRICH:
