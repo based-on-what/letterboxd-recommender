@@ -49,8 +49,6 @@ ONE_DAY = 60 * 60 * 24
 SIX_HOURS = 60 * 60 * 6
 TWO_HOURS = 60 * 60 * 2
 USER_CACHE_TTL = 60 * 30
-MAX_FILMS_TO_ENRICH = 500
-MAX_SEED_FILMS = 100
 TIMEOUT_WARNING_S = 240
 ENRICH_WORKERS = 6
 SIMILAR_WORKERS = 4
@@ -93,9 +91,12 @@ def _get_or_create_streams(request_id):
             streams = {
                 'logs': Queue(),
                 'recommendations': Queue(),
+                'status': Queue(),
                 'logs_connected': 0,
                 'recommendations_connected': 0,
+                'status_connected': 0,
                 'recommendations_done': False,
+                'status_done': False,
             }
             REQUEST_STREAMS[request_id] = streams
         return streams
@@ -115,6 +116,13 @@ def _mark_recommendations_done(request_id):
             streams['recommendations_done'] = True
 
 
+def _mark_status_done(request_id):
+    with REQUEST_STREAMS_LOCK:
+        streams = REQUEST_STREAMS.get(request_id)
+        if streams:
+            streams['status_done'] = True
+
+
 def _track_stream_connection(request_id, stream_name, connected):
     with REQUEST_STREAMS_LOCK:
         streams = REQUEST_STREAMS.get(request_id)
@@ -127,8 +135,10 @@ def _track_stream_connection(request_id, stream_name, connected):
 
         if (
             streams.get('recommendations_done')
+            and streams.get('status_done')
             and streams.get('logs_connected', 0) == 0
             and streams.get('recommendations_connected', 0) == 0
+            and streams.get('status_connected', 0) == 0
         ):
             REQUEST_STREAMS.pop(request_id, None)
 
@@ -879,7 +889,7 @@ class MovieRecommender:
             'decades': [f"{d[0]}s" for d in Counter(decades).most_common(3)]
         }
     
-    def get_recommendations(self, enriched_films, count=None, force_refresh=False, request_id=None):
+    def get_recommendations(self, enriched_films, count=None, force_refresh=False, request_id=None, username=None):
         """
         Generate recommendations based on the user's films.
 
@@ -945,12 +955,6 @@ class MovieRecommender:
         logger.info(f"\n=== 4+ STAR FILMS USED FOR RECOMMENDATIONS ===")
         logger.info(f"Total films with 4+ stars: {len(highly_rated_films)}")
         
-        # Limit the number of films processed to avoid timeouts
-        max_films_to_process = MAX_SEED_FILMS
-        if len(highly_rated_films) > max_films_to_process:
-            logger.info(f"Limiting to top {max_films_to_process} highest-rated films to prevent timeout")
-            highly_rated_films = highly_rated_films[:max_films_to_process]
-        
         # Export JSON locally for development debugging
         if IS_DEV:
             try:
@@ -987,6 +991,13 @@ class MovieRecommender:
         
         def process_similar(film):
             """Collect similar movies for a given seed title."""
+            if stream_queues is not None:
+                stream_queues['status'].put({
+                    'title': film.get('title', 'Untitled'),
+                    'user_rating': film.get('user_rating', 0),
+                    'username': username or 'user',
+                })
+
             if not film.get('tmdb_id'):
                 logger.info(f"[SKIP] {film.get('title')} - No TMDB ID")
                 return []
@@ -1323,6 +1334,41 @@ def recommendations_stream():
     )
 
 
+@app.route('/api/status-stream', methods=['GET'])
+def status_stream():
+    """SSE endpoint that streams currently analyzed movie metadata."""
+    request_id = request.args.get('request_id')
+    if not request_id:
+        return jsonify({'error': 'request_id is required'}), 400
+
+    status_queue = _get_or_create_streams(request_id)['status']
+
+    def generate():
+        _track_stream_connection(request_id, 'status', True)
+        try:
+            while True:
+                try:
+                    status = status_queue.get(timeout=2)
+                    if status == 'DONE':
+                        yield "data: {\"status\": \"complete\"}\n\n"
+                        break
+                    yield f"data: {json.dumps(status)}\n\n"
+                except queue.Empty:
+                    yield ": heartbeat\n\n"
+        finally:
+            _track_stream_connection(request_id, 'status', False)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
 @app.route("/")
 def home():
     """Serve the landing page."""
@@ -1396,13 +1442,6 @@ def recommend():
                 'letterboxd_failures': rec_sys._letterboxd_last_failures[-8:],
             }), 404
         
-        # Limit processing to avoid production timeouts
-        if len(user_films) > MAX_FILMS_TO_ENRICH:
-            logger.info(f"Limiting processing: {len(user_films)} films -> {MAX_FILMS_TO_ENRICH} (keeping highest rated)")
-            # Keep the highest-rated films
-            user_films_sorted = sorted(user_films, key=lambda x: x.get('rating', 0), reverse=True)
-            user_films = user_films_sorted[:MAX_FILMS_TO_ENRICH]
-        
         # Enrich with TMDB data
         enriched = []
         
@@ -1436,7 +1475,11 @@ def recommend():
         
         # Generate recommendations
         rec_start = time.time()
-        recommendations = rec_sys.get_recommendations(enriched, request_id=request_id)
+        recommendations = rec_sys.get_recommendations(
+            enriched,
+            request_id=request_id,
+            username=username,
+        )
         logger.info(f"Recommendations generated in {time.time() - rec_start:.2f}s")
         
         # Retrieve streaming information if requested
@@ -1466,6 +1509,8 @@ def recommend():
         try:
             _mark_recommendations_done(request_id)
             _get_or_create_streams(request_id)['recommendations'].put('DONE')
+            _mark_status_done(request_id)
+            _get_or_create_streams(request_id)['status'].put('DONE')
         except Exception:
             pass
         

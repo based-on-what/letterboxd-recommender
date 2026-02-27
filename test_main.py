@@ -92,6 +92,7 @@ def test_get_streaming_without_dependency():
 def test_routes_health_get_pages_recommend():
     client = main.app.test_client()
     assert client.get('/_health').status_code == 200
+    assert client.get('/api/status-stream').status_code == 400
     with patch.object(main.MovieRecommender, 'get_page_count', return_value=2):
         assert client.post('/api/get_pages', json={'username': 'u'}).get_json()['pages'] == 2
     with patch.object(main.MovieRecommender, 'get_all_rated_films', return_value=([{'title': 'A', 'rating': 4}], 1)), patch.object(main.MovieRecommender, 'analyze_preferences', return_value={'genres': [], 'directors': [], 'decades': []}), patch.object(main.MovieRecommender, 'get_recommendations', return_value=[]), patch.object(main, 'enrich_film_task', return_value={'title': 'A', 'user_rating': 4}):
