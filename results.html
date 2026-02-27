@@ -35,6 +35,22 @@
       z-index: 100;
       font-family: monospace;
     }
+
+    .live-status {
+      position: fixed;
+      top: 68px;
+      right: 20px;
+      background: #1e1e1e;
+      color: #e0e0e0;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 8px 12px;
+      max-width: 420px;
+      z-index: 99;
+      font-size: 0.82rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+      display: none;
+    }
     
     .export-button {
       position: fixed;
@@ -343,7 +359,7 @@
         justify-content: center;
       }
       
-      .final-timer, .export-button {
+      .final-timer, .export-button, .live-status {
         position: static;
         margin: 10px auto;
         display: block;
@@ -367,6 +383,7 @@
 
   <button class="export-button" onclick="exportToExcel()">📊 Export to Excel</button>
   <div class="final-timer" id="timerDisplay">--:--</div>
+  <div class="live-status" id="liveStatusDisplay"></div>
 
   <div class="container">
     <div class="header-info">
@@ -446,6 +463,7 @@
     let currentSort = 'original';
     let userCountryName = 'Global';
     let userCountryCode = '';
+    let statusEventSource = null;
     document.title = `Results for ${username}`;
     document.getElementById('pageTitle').textContent = `For: ${username}`;
 
@@ -505,6 +523,34 @@
       // Fetch from API if no cache - with live timer
       const start = new Date();
       let timerInterval = null;
+      const liveStatusDisplay = document.getElementById('liveStatusDisplay');
+      const requestId = (window.crypto && window.crypto.randomUUID)
+        ? window.crypto.randomUUID()
+        : `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+      statusEventSource = new EventSource(`/api/status-stream?request_id=${encodeURIComponent(requestId)}`);
+      statusEventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.status === 'complete') {
+            liveStatusDisplay.style.display = 'none';
+            statusEventSource.close();
+            statusEventSource = null;
+            return;
+          }
+          const rating = Number(payload.user_rating || 0).toFixed(1);
+          liveStatusDisplay.textContent = `Currently analyzing: ${payload.title} — ${payload.username}'s rating: ★ ${rating}`;
+          liveStatusDisplay.style.display = 'block';
+        } catch (err) {
+          console.warn('Status stream parse error', err);
+        }
+      };
+      statusEventSource.onerror = () => {
+        if (statusEventSource) {
+          statusEventSource.close();
+          statusEventSource = null;
+        }
+      };
       
       // Start live timer display
       timerInterval = setInterval(() => {
@@ -519,7 +565,8 @@
           body: JSON.stringify({ 
             username: username, 
             country: userCountryCode,
-            include_streaming: true
+            include_streaming: true,
+            request_id: requestId
           })
         });
         
@@ -537,6 +584,11 @@
         document.querySelector('.spinner').textContent = "❌ Error";
         document.querySelector('.loading-overlay div:last-child').textContent = e.message;
       } finally {
+        liveStatusDisplay.style.display = 'none';
+        if (statusEventSource) {
+          statusEventSource.close();
+          statusEventSource = null;
+        }
         if (document.getElementById('grid').children.length > 0) {
           document.getElementById('loader').style.display = 'none';
         }
