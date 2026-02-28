@@ -60,6 +60,51 @@
     .loading-box { display: none; margin-top: 25px; }
     .timer { font-size: 1.5rem; color: #ffbd00; font-weight: bold; margin-bottom: 10px;}
     .status { color: #888; font-size: 0.9rem; }
+    .progress-wrap {
+      width: 100%;
+      max-width: 320px;
+      margin: 10px auto 0;
+      text-align: left;
+    }
+    .progress-label {
+      font-size: 0.78rem;
+      color: #777;
+      margin-bottom: 6px;
+    }
+    .progress-track {
+      width: 100%;
+      height: 10px;
+      background: #2a2a2a;
+      border: 1px solid #3b3b3b;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #00a53f, #00e054);
+      transition: width 0.25s ease;
+    }
+    .live-log-box {
+      width: 100%;
+      max-width: 520px;
+      margin: 12px auto 0;
+      background: #151515;
+      border: 1px solid #303030;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: left;
+      max-height: 180px;
+      overflow-y: auto;
+      display: none;
+    }
+    .live-log-line {
+      color: #9f9f9f;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      line-height: 1.35;
+      margin-bottom: 4px;
+    }
     
     .recommendations-live {
       margin-top: 40px;
@@ -176,7 +221,13 @@
     <div id="loading" class="loading-box">
       <div class="timer" id="chronometer">00:00.00</div>
       <div class="status">Analyzing profile & fetching data...</div>
-      <div class="status" style="font-size: 0.8rem; margin-top: 5px; color: #555;">(A new tab will open when finished)</div>
+      <div class="progress-wrap">
+        <div class="progress-label" id="progress-label">Progress: 0%</div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+      <div id="live-log-box" class="live-log-box"></div>
     </div>
   </div>
 
@@ -192,9 +243,12 @@
     let userCountryName = 'Global';
     let eventSource; // Track EventSource connection
     let recsEventSource; // Track recommendations EventSource connection
+    let statusEventSource; // Track status EventSource connection
     let activeRequestId = null;
     let liveRecommendations = []; // Store recommendations shown in real-time
     let shownMovieIds = new Set(); // Track movie IDs already displayed to prevent duplicates
+    let totalSeedFilms = 0;
+    let processedSeedFilms = 0;
 
     // Convert an ISO country code into its flag emoji.
     function countryCodeToFlag(countryCode) {
@@ -240,6 +294,8 @@
       eventSource.onmessage = function(event) {
         if (event.data && event.data !== 'heartbeat') {
           console.log('[SERVER]', event.data);
+          addLiveLogLine(event.data);
+          updateProgressFromLog(event.data);
         }
       };
       
@@ -247,6 +303,95 @@
         // Connection error - try to reconnect
         console.warn('[LOGS] Connection lost, will attempt to reconnect...');
       };
+    }
+
+    // Connect to status stream to track seed-film processing.
+    function connectToStatusStream(requestId) {
+      if (statusEventSource) {
+        statusEventSource.close();
+      }
+
+      statusEventSource = new EventSource(`/api/status-stream?request_id=${encodeURIComponent(requestId)}`);
+      statusEventSource.onmessage = function(event) {
+        if (!event.data || event.data === 'heartbeat') return;
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.status === 'complete') {
+            setProgress(98, 'Finalizing recommendations...');
+            disconnectFromStatusStream();
+            return;
+          }
+
+          if (payload.title) {
+            processedSeedFilms += 1;
+            const ratio = totalSeedFilms > 0 ? Math.min(1, processedSeedFilms / totalSeedFilms) : 0;
+            const pct = 60 + Math.round(ratio * 35);
+            setProgress(pct, `Analyzing favorites: ${processedSeedFilms}/${Math.max(totalSeedFilms, processedSeedFilms)}`);
+            addLiveLogLine(`Analyzing: ${payload.title} (${payload.user_rating || 0}★)`);
+          }
+        } catch (_e) {}
+      };
+    }
+
+    function disconnectFromStatusStream() {
+      if (statusEventSource) {
+        statusEventSource.close();
+        statusEventSource = null;
+      }
+    }
+
+    function setProgress(percent, labelText) {
+      const clamped = Math.max(0, Math.min(100, percent));
+      document.getElementById('progress-fill').style.width = `${clamped}%`;
+      document.getElementById('progress-label').textContent = labelText || `Progress: ${clamped}%`;
+    }
+
+    function addLiveLogLine(message) {
+      const box = document.getElementById('live-log-box');
+      if (!message || message === 'heartbeat') return;
+      box.style.display = 'block';
+      const line = document.createElement('div');
+      line.className = 'live-log-line';
+      line.textContent = `[SERVER] ${message}`;
+      box.appendChild(line);
+      while (box.children.length > 40) {
+        box.removeChild(box.firstChild);
+      }
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function updateProgressFromLog(message) {
+      const text = String(message || '');
+      const starMatch = text.match(/Total films with 4\+ stars:\s*(\d+)/i);
+      if (starMatch) {
+        totalSeedFilms = parseInt(starMatch[1], 10) || 0;
+        processedSeedFilms = 0;
+        setProgress(60, `Analyzing favorites: 0/${totalSeedFilms}`);
+        return;
+      }
+
+      if (/Fetched\s+\d+\s+films/i.test(text)) {
+        setProgress(25, 'Profile fetched, enriching with TMDB...');
+        return;
+      }
+
+      if (/Enrichment completed/i.test(text)) {
+        setProgress(55, 'Preferences detected, preparing recommendations...');
+        return;
+      }
+
+      if (/Returning\s+\d+\s+recommendations/i.test(text) || /ANALYSIS COMPLETE/i.test(text)) {
+        setProgress(100, 'Progress: 100%');
+      }
+    }
+
+    function resetLiveProgressUi() {
+      totalSeedFilms = 0;
+      processedSeedFilms = 0;
+      setProgress(0, 'Progress: 0%');
+      const box = document.getElementById('live-log-box');
+      box.innerHTML = '';
+      box.style.display = 'none';
     }
 
     // Disconnect from logs stream
@@ -376,6 +521,9 @@
 
       // Connect to logs stream BEFORE starting the request
       connectToLogsStream(activeRequestId);
+      connectToStatusStream(activeRequestId);
+      resetLiveProgressUi();
+      setProgress(5, 'Starting analysis...');
       
       // Connect to recommendations stream for real-time updates
       connectToRecommendationsStream(activeRequestId);
@@ -400,7 +548,7 @@
         const endTime = new Date();
         const totalTime = endTime - startTime;
 
-        // Save data to localStorage to transfer to new tab instantly without re-fetching
+        // Save data to localStorage so results page can render instantly without re-fetching
         // We use a specific key for this user
         const cacheKey = `lb_data_${username}`;
         localStorage.setItem(cacheKey, JSON.stringify({
@@ -419,6 +567,8 @@
         
         // Disconnect from recommendations stream
         disconnectFromRecommendationsStream();
+        disconnectFromStatusStream();
+        setProgress(100, 'Progress: 100%');
         
         // Show and configure the recommendations button
         const recBtn = document.getElementById('recommendations-btn');
@@ -434,6 +584,7 @@
         document.getElementById('loading').style.display = 'none';
         disconnectFromLogsStream();
         disconnectFromRecommendationsStream();
+        disconnectFromStatusStream();
         alert("Error: " + e.message);
       }
     }
@@ -449,6 +600,7 @@
     window.addEventListener('beforeunload', function() {
       disconnectFromLogsStream();
       disconnectFromRecommendationsStream();
+      disconnectFromStatusStream();
     });
   </script>
 </body>
