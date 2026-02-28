@@ -49,6 +49,7 @@ ONE_DAY = 60 * 60 * 24
 SIX_HOURS = 60 * 60 * 6
 TWO_HOURS = 60 * 60 * 2
 USER_CACHE_TTL = 60 * 30
+USER_STALE_CACHE_TTL = ONE_WEEK
 TIMEOUT_WARNING_S = 240
 ENRICH_WORKERS = 6
 SIMILAR_WORKERS = 4
@@ -82,6 +83,53 @@ PROVIDER_NAME_MAP = {
 
 REQUEST_STREAMS = {}
 REQUEST_STREAMS_LOCK = Lock()
+
+LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv('LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD', '5'))
+LETTERBOXD_CIRCUIT_COOLDOWN_S = int(os.getenv('LETTERBOXD_CIRCUIT_COOLDOWN_S', '180'))
+
+
+class IncidentTracker:
+    """Track scrape failures and apply a lightweight circuit breaker."""
+
+    def __init__(self):
+        self._lock = Lock()
+        self.letterboxd_total_failures = 0
+        self.letterboxd_consecutive_failures = 0
+        self.letterboxd_last_status = None
+        self.circuit_open_until = 0.0
+
+    def is_circuit_open(self):
+        with self._lock:
+            return time.time() < self.circuit_open_until
+
+    def record_letterboxd_result(self, success, status=None):
+        with self._lock:
+            if success:
+                self.letterboxd_consecutive_failures = 0
+                self.letterboxd_last_status = 200
+                return
+
+            self.letterboxd_total_failures += 1
+            self.letterboxd_consecutive_failures += 1
+            self.letterboxd_last_status = status
+
+            if self.letterboxd_consecutive_failures >= LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD:
+                self.circuit_open_until = time.time() + LETTERBOXD_CIRCUIT_COOLDOWN_S
+
+    def snapshot(self):
+        with self._lock:
+            now = time.time()
+            open_now = now < self.circuit_open_until
+            return {
+                'letterboxd_total_failures': self.letterboxd_total_failures,
+                'letterboxd_consecutive_failures': self.letterboxd_consecutive_failures,
+                'letterboxd_last_status': self.letterboxd_last_status,
+                'letterboxd_circuit_open': open_now,
+                'letterboxd_circuit_retry_after_s': max(0, int(self.circuit_open_until - now)) if open_now else 0,
+            }
+
+
+INCIDENT_TRACKER = IncidentTracker()
 
 
 def _get_or_create_streams(request_id):
@@ -483,6 +531,7 @@ class MovieRecommender:
         self.max_workers = max_workers
         self._tmdb_auth_warning_emitted = False
         self._letterboxd_last_failures = []
+        self.used_stale_profile_cache = False
         
         self.country_names = {
             'CL': 'Chile', 'AR': 'Argentina', 'MX': 'Mexico', 'US': 'United States',
@@ -545,6 +594,10 @@ class MovieRecommender:
         
         if service == 'letterboxd':
             self._letterboxd_last_failures = []
+            if INCIDENT_TRACKER.is_circuit_open():
+                self._letterboxd_last_failures.append('circuit=open')
+                logger.warning('Letterboxd circuit breaker open; skipping live scrape attempt')
+                return None
 
         last_status = None
         merged_headers = dict(session.headers)
@@ -559,6 +612,8 @@ class MovieRecommender:
                 last_status = r.status_code
 
                 if r.status_code == 200:
+                    if service == 'letterboxd':
+                        INCIDENT_TRACKER.record_letterboxd_result(success=True, status=200)
                     return r
 
                 if service == 'letterboxd' and r.status_code in (403, 429, 503):
@@ -610,6 +665,7 @@ class MovieRecommender:
         
         logger.warning(f"Failed after {max_retries + 1} attempts: {url}")
         if service == 'letterboxd':
+            INCIDENT_TRACKER.record_letterboxd_result(success=False, status=last_status)
             logger.warning(
                 "Letterboxd scraping failed after retries. "
                 f"cloudscraper_available={cloudscraper_session is not None}, "
@@ -677,6 +733,21 @@ class MovieRecommender:
         """
         if not username:
             return [], 0
+
+        self.used_stale_profile_cache = False
+
+        stale_cache_key = f"{username}:pages:stale:v1"
+
+        def load_stale_cache():
+            stale_cached = cache.get('user_scrape', stale_cache_key)
+            if stale_cached:
+                self.used_stale_profile_cache = True
+                logger.warning(
+                    "Serving stale cached profile for %s due to live scrape failure",
+                    username,
+                )
+                return stale_cached.get('films', []), stale_cached.get('pages', 0)
+            return [], 0
         
         cache_key = f"{username}:pages:v2"
         cached = cache.get('user_scrape', cache_key)
@@ -689,7 +760,7 @@ class MovieRecommender:
         try:
             pages = self.get_page_count(username)
             if pages <= 0:
-                return [], 0
+                return load_stale_cache()
 
             rating_map = {f'rated-{i}': i / 2.0 for i in range(1, 11)}
             headers = dict(LETTERBOXD_HEADERS)
@@ -764,14 +835,18 @@ class MovieRecommender:
             
             logger.info(f"Total films found: {len(films)} "
                         f"({len([f for f in films if f.get('has_rating')])} rated)")
+
+            if not films:
+                return load_stale_cache()
             
             cache.set('user_scrape', cache_key, {'pages': pages, 'films': films}, ttl=USER_CACHE_TTL)
+            cache.set('user_scrape', stale_cache_key, {'pages': pages, 'films': films}, ttl=USER_STALE_CACHE_TTL)
             
             return films, pages
             
         except Exception as e:
             logger.error(f"Error scraping profile: {e}")
-            return [], 0
+            return load_stale_cache()
     
     def get_tmdb_details(self, title, force_refresh=False):
         """
@@ -1275,8 +1350,19 @@ def enrich_film_task(rec_sys, film):
 
 @app.route('/_health', methods=['GET'])
 def health():
-    """Lightweight health check endpoint for monitoring."""
-    return jsonify({"status": "ok"}), 200
+    """Health check endpoint with degraded-mode visibility."""
+    incident = INCIDENT_TRACKER.snapshot()
+    return jsonify({
+        "status": "ok",
+        "degraded": incident.get('letterboxd_circuit_open', False),
+        "incident": incident,
+    }), 200
+
+
+@app.route('/_incident-status', methods=['GET'])
+def incident_status():
+    """Operational incident snapshot for alerting/diagnostics."""
+    return jsonify(INCIDENT_TRACKER.snapshot()), 200
 
 
 @app.route('/api/logs-stream', methods=['GET'])
@@ -1465,13 +1551,18 @@ def recommend():
             throttled_or_temp_block = any(('status=429' in f) or ('status=503' in f) for f in failures)
 
             if blocked_by_letterboxd or throttled_or_temp_block:
-                return jsonify({
+                incident = INCIDENT_TRACKER.snapshot()
+                response = jsonify({
                     'error': 'Could not read this public Letterboxd profile from the server network (blocked/throttled by Letterboxd).',
                     'username': username,
                     'request_id': request_id,
                     'hint': 'Try again in a few minutes. If it persists, use a deployment region/proxy with lower bot reputation risk.',
                     'letterboxd_failures': failures,
-                }), 503
+                    'incident': incident,
+                })
+                if incident.get('letterboxd_circuit_open'):
+                    response.headers['Retry-After'] = str(incident.get('letterboxd_circuit_retry_after_s', 0))
+                return response, 503
 
             return jsonify({
                 'error': 'No movies found for this username.',
@@ -1650,14 +1741,22 @@ def recommend():
             except Exception as e:
                 logger.warning(f"Could not export JSON files: {e}")
         
-        return jsonify({
+        response_payload = {
             'username': username,
             'country_name': rec_sys.get_country_name(),
             'pages': pages,
             'preferences': preferences,
             'recommendations': recommendations,
             'request_id': request_id,
-        })
+        }
+        if rec_sys.used_stale_profile_cache:
+            response_payload['data_freshness'] = 'stale_cache'
+            response_payload['hint'] = (
+                'Showing last successful profile snapshot because live Letterboxd scraping was blocked or throttled.'
+            )
+            response_payload['incident'] = INCIDENT_TRACKER.snapshot()
+
+        return jsonify(response_payload)
         
     except Exception as e:
         logger.exception("Error generating recommendations")

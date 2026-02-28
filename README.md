@@ -158,6 +158,8 @@ MIN_RECOMMEND_RATING=7.0
 MAX_SCRAPE_PAGES=50
 DEFAULT_MAX_FILMS=30
 DEFAULT_LIMIT_RECS=60
+LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD=5
+LETTERBOXD_CIRCUIT_COOLDOWN_S=180
 ```
 
 #### Configuration Reference
@@ -172,6 +174,8 @@ DEFAULT_LIMIT_RECS=60
 | `DEFAULT_MAX_FILMS` | No | `30` | Maximum films to enrich for preference analysis |
 | `DEFAULT_LIMIT_RECS` | No | `60` | Maximum recommendations to return |
 | `FLASK_ENV` | No | `production` | Set to `development` for debug mode |
+| `LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD` | No | `5` | Consecutive Letterboxd failures before opening circuit breaker |
+| `LETTERBOXD_CIRCUIT_COOLDOWN_S` | No | `180` | Seconds to skip live Letterboxd scraping while incident is active |
 
 ---
 
@@ -242,14 +246,32 @@ http://localhost:8080/karsten
 GET /_health
 ```
 
-Returns a basic health status for monitoring.
+Returns health plus degraded-mode incident information.
 
 **Response:**
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "degraded": false,
+  "incident": {
+    "letterboxd_total_failures": 0,
+    "letterboxd_consecutive_failures": 0,
+    "letterboxd_last_status": 200,
+    "letterboxd_circuit_open": false,
+    "letterboxd_circuit_retry_after_s": 0
+  }
 }
 ```
+
+---
+
+### Incident Status
+
+```http
+GET /_incident-status
+```
+
+Returns the live anti-incident snapshot used for alerting and diagnostics.
 
 ---
 
