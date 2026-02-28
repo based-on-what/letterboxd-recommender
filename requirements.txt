@@ -9,3 +9,4 @@ gunicorn
 dotenv
 cloudscraper
 curl_cffi
+flask-limiter
