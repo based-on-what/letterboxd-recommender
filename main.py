@@ -690,7 +690,7 @@ class MovieRecommender:
             pages = self.get_page_count(username)
             if pages <= 0:
                 return [], 0
-            
+
             rating_map = {f'rated-{i}': i / 2.0 for i in range(1, 11)}
             headers = dict(LETTERBOXD_HEADERS)
             
@@ -745,8 +745,19 @@ class MovieRecommender:
             
             with ThreadPoolExecutor(max_workers=min(self.max_workers, 6)) as ex:
                 futures = [ex.submit(scrape_page, p) for p in range(1, pages + 1)]
+                completed_pages = 0
+                progress_interval = max(1, pages // 10)
                 for f in as_completed(futures):
-                    films.extend(f.result())
+                    page_films = f.result()
+                    films.extend(page_films)
+                    completed_pages += 1
+                    if completed_pages % progress_interval == 0 or completed_pages == pages:
+                        logger.info(
+                            "Scrape progress: "
+                            f"{completed_pages}/{pages} pages "
+                            f"({(completed_pages / max(pages, 1)) * 100:.0f}%) | "
+                            f"films_collected={len(films)}"
+                        )
             
             if not include_unrated:
                 films = [f for f in films if f.get('has_rating')]
