@@ -1472,36 +1472,65 @@ def recommend():
         
         # Enrich with TMDB data
         enriched = []
-        
+
         logger.info(f"\nEnriching {len(user_films)} films with TMDB metadata...")
+        logger.info(
+            f"Stage: TMDB enrichment started | workers={ENRICH_WORKERS} | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
         enrich_start = time.time()
+        total_to_enrich = len(user_films)
+        progress_interval = max(1, total_to_enrich // 10)
+        completed_enrich = 0
         with ThreadPoolExecutor(max_workers=ENRICH_WORKERS) as ex:
             futures = [ex.submit(enrich_film_task, rec_sys, film) for film in user_films]
             for fut in as_completed(futures):
+                completed_enrich += 1
                 try:
                     result = fut.result()
                     if result:
                         enriched.append(result)
                 except Exception as exc:
                     logger.error(f"Enrichment task failed: {exc}")
+
+                if completed_enrich % progress_interval == 0 or completed_enrich == total_to_enrich:
+                    logger.info(
+                        "Enrichment progress: "
+                        f"{completed_enrich}/{total_to_enrich} "
+                        f"({(completed_enrich / max(total_to_enrich, 1)) * 100:.0f}%) | "
+                        f"enriched_ok={len(enriched)} | "
+                        f"stage_elapsed={time.time() - enrich_start:.2f}s"
+                    )
+
         logger.info(f"Enrichment completed in {time.time() - enrich_start:.2f}s")
-        
+        logger.info(
+            f"Stage: TMDB enrichment finished | enriched_ok={len(enriched)} | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
+
         # Analyze preferences
+        logger.info(
+            f"Stage: preference analysis started | input_films={len(enriched)} | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
         pref_start = time.time()
         preferences = rec_sys.analyze_preferences(enriched)
         logger.info(f"\nPreferences detected in {time.time() - pref_start:.2f}s:")
+        logger.info(
+            f"Stage: preference analysis finished | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
         logger.info(f"  Genres: {', '.join(preferences.get('genres', []))}")
         logger.info(f"  Directors: {', '.join(preferences.get('directors', []))}")
         logger.info(f"  Decades: {', '.join(preferences.get('decades', []))}")
-        
+
         # Check elapsed time and adjust processing
         elapsed = time.time() - start_time
         logger.info(f"\nTime elapsed so far: {elapsed:.2f}s")
-        
+
         if elapsed > TIMEOUT_WARNING_S:
             logger.warning("Approaching timeout limit, limiting recommendation processing")
-        
+
         # Generate recommendations
+        logger.info(
+            f"Stage: recommendation generation started | seed_input_films={len(enriched)} | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
         rec_start = time.time()
         recommendations = rec_sys.get_recommendations(
             enriched,
