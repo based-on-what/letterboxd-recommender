@@ -546,6 +546,9 @@ class MovieRecommender:
         if service == 'letterboxd':
             self._letterboxd_last_failures = []
 
+        last_status = None
+        merged_headers = dict(session.headers)
+
         for attempt in range(max_retries + 1):
             try:
                 merged_headers = dict(session.headers)
@@ -553,6 +556,7 @@ class MovieRecommender:
                     merged_headers.update(headers)
 
                 r = _request_with_fallback(session, url, params, merged_headers, 12, service)
+                last_status = r.status_code
 
                 if r.status_code == 200:
                     return r
@@ -609,9 +613,12 @@ class MovieRecommender:
             logger.warning(
                 "Letterboxd scraping failed after retries. "
                 f"cloudscraper_available={cloudscraper_session is not None}, "
+                f"curl_cffi_available={curl_requests is not None}, "
                 f"proxy_env_http={bool(os.getenv('HTTP_PROXY') or os.getenv('http_proxy'))}, "
                 f"proxy_env_https={bool(os.getenv('HTTPS_PROXY') or os.getenv('https_proxy'))}, "
-                f"last_failures={self._letterboxd_last_failures}"
+                f"user_agent={merged_headers.get('User-Agent', DEFAULT_USER_AGENT)}, "
+                f"last_status={last_status}, "
+                f"last_failures={self._letterboxd_last_failures[-8:]}"
             )
         return None
     
@@ -683,7 +690,7 @@ class MovieRecommender:
             pages = self.get_page_count(username)
             if pages <= 0:
                 return [], 0
-            
+
             rating_map = {f'rated-{i}': i / 2.0 for i in range(1, 11)}
             headers = dict(LETTERBOXD_HEADERS)
             
@@ -738,8 +745,19 @@ class MovieRecommender:
             
             with ThreadPoolExecutor(max_workers=min(self.max_workers, 6)) as ex:
                 futures = [ex.submit(scrape_page, p) for p in range(1, pages + 1)]
+                completed_pages = 0
+                progress_interval = max(1, pages // 10)
                 for f in as_completed(futures):
-                    films.extend(f.result())
+                    page_films = f.result()
+                    films.extend(page_films)
+                    completed_pages += 1
+                    if completed_pages % progress_interval == 0 or completed_pages == pages:
+                        logger.info(
+                            "Scrape progress: "
+                            f"{completed_pages}/{pages} pages "
+                            f"({(completed_pages / max(pages, 1)) * 100:.0f}%) | "
+                            f"films_collected={len(films)}"
+                        )
             
             if not include_unrated:
                 films = [f for f in films if f.get('has_rating')]
@@ -1375,6 +1393,14 @@ def home():
     return app.send_static_file('index.html')
 
 
+
+
+@app.route('/favicon.ico')
+def favicon():
+    """Avoid noisy favicon 404/502s on platforms expecting an icon file."""
+    return ('', 204)
+
+
 @app.route('/api/get_pages', methods=['POST'])
 @limiter.limit('10 per minute')
 def get_pages():
@@ -1434,46 +1460,88 @@ def recommend():
         logger.info(f"Fetched {len(user_films)} films in {time.time() - start_time:.2f}s")
         
         if not user_films:
+            failures = rec_sys._letterboxd_last_failures[-8:]
+            blocked_by_letterboxd = any('status=403' in f for f in failures)
+            throttled_or_temp_block = any(('status=429' in f) or ('status=503' in f) for f in failures)
+
+            if blocked_by_letterboxd or throttled_or_temp_block:
+                return jsonify({
+                    'error': 'Could not read this public Letterboxd profile from the server network (blocked/throttled by Letterboxd).',
+                    'username': username,
+                    'request_id': request_id,
+                    'hint': 'Try again in a few minutes. If it persists, use a deployment region/proxy with lower bot reputation risk.',
+                    'letterboxd_failures': failures,
+                }), 503
+
             return jsonify({
-                'error': 'No movies found. Profile may be private/unavailable or Letterboxd blocked the request.',
+                'error': 'No movies found for this username.',
                 'username': username,
                 'request_id': request_id,
                 'hint': 'Check backend logs for Letterboxd HTTP status / proxy diagnostics.',
-                'letterboxd_failures': rec_sys._letterboxd_last_failures[-8:],
+                'letterboxd_failures': failures,
             }), 404
         
         # Enrich with TMDB data
         enriched = []
-        
+
         logger.info(f"\nEnriching {len(user_films)} films with TMDB metadata...")
+        logger.info(
+            f"Stage: TMDB enrichment started | workers={ENRICH_WORKERS} | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
         enrich_start = time.time()
+        total_to_enrich = len(user_films)
+        progress_interval = max(1, total_to_enrich // 10)
+        completed_enrich = 0
         with ThreadPoolExecutor(max_workers=ENRICH_WORKERS) as ex:
             futures = [ex.submit(enrich_film_task, rec_sys, film) for film in user_films]
             for fut in as_completed(futures):
+                completed_enrich += 1
                 try:
                     result = fut.result()
                     if result:
                         enriched.append(result)
                 except Exception as exc:
                     logger.error(f"Enrichment task failed: {exc}")
+
+                if completed_enrich % progress_interval == 0 or completed_enrich == total_to_enrich:
+                    logger.info(
+                        "Enrichment progress: "
+                        f"{completed_enrich}/{total_to_enrich} "
+                        f"({(completed_enrich / max(total_to_enrich, 1)) * 100:.0f}%) | "
+                        f"enriched_ok={len(enriched)} | "
+                        f"stage_elapsed={time.time() - enrich_start:.2f}s"
+                    )
+
         logger.info(f"Enrichment completed in {time.time() - enrich_start:.2f}s")
-        
+        logger.info(
+            f"Stage: TMDB enrichment finished | enriched_ok={len(enriched)} | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
+
         # Analyze preferences
+        logger.info(
+            f"Stage: preference analysis started | input_films={len(enriched)} | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
         pref_start = time.time()
         preferences = rec_sys.analyze_preferences(enriched)
         logger.info(f"\nPreferences detected in {time.time() - pref_start:.2f}s:")
+        logger.info(
+            f"Stage: preference analysis finished | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
         logger.info(f"  Genres: {', '.join(preferences.get('genres', []))}")
         logger.info(f"  Directors: {', '.join(preferences.get('directors', []))}")
         logger.info(f"  Decades: {', '.join(preferences.get('decades', []))}")
-        
+
         # Check elapsed time and adjust processing
         elapsed = time.time() - start_time
         logger.info(f"\nTime elapsed so far: {elapsed:.2f}s")
-        
+
         if elapsed > TIMEOUT_WARNING_S:
             logger.warning("Approaching timeout limit, limiting recommendation processing")
-        
+
         # Generate recommendations
+        logger.info(
+            f"Stage: recommendation generation started | seed_input_films={len(enriched)} | elapsed_since_start={time.time() - start_time:.2f}s"
+        )
         rec_start = time.time()
         recommendations = rec_sys.get_recommendations(
             enriched,
