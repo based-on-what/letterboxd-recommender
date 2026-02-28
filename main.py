@@ -1382,6 +1382,14 @@ def home():
     return app.send_static_file('index.html')
 
 
+
+
+@app.route('/favicon.ico')
+def favicon():
+    """Avoid noisy favicon 404/502s on platforms expecting an icon file."""
+    return ('', 204)
+
+
 @app.route('/api/get_pages', methods=['POST'])
 @limiter.limit('10 per minute')
 def get_pages():
@@ -1441,12 +1449,25 @@ def recommend():
         logger.info(f"Fetched {len(user_films)} films in {time.time() - start_time:.2f}s")
         
         if not user_films:
+            failures = rec_sys._letterboxd_last_failures[-8:]
+            blocked_by_letterboxd = any('status=403' in f for f in failures)
+            throttled_or_temp_block = any(('status=429' in f) or ('status=503' in f) for f in failures)
+
+            if blocked_by_letterboxd or throttled_or_temp_block:
+                return jsonify({
+                    'error': 'Could not read this public Letterboxd profile from the server network (blocked/throttled by Letterboxd).',
+                    'username': username,
+                    'request_id': request_id,
+                    'hint': 'Try again in a few minutes. If it persists, use a deployment region/proxy with lower bot reputation risk.',
+                    'letterboxd_failures': failures,
+                }), 503
+
             return jsonify({
-                'error': 'No movies found. Profile may be private/unavailable or Letterboxd blocked the request.',
+                'error': 'No movies found for this username.',
                 'username': username,
                 'request_id': request_id,
                 'hint': 'Check backend logs for Letterboxd HTTP status / proxy diagnostics.',
-                'letterboxd_failures': rec_sys._letterboxd_last_failures[-8:],
+                'letterboxd_failures': failures,
             }), 404
         
         # Enrich with TMDB data
