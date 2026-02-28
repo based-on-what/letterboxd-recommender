@@ -98,3 +98,68 @@ def test_routes_health_get_pages_recommend():
     with patch.object(main.MovieRecommender, 'get_all_rated_films', return_value=([{'title': 'A', 'rating': 4}], 1)), patch.object(main.MovieRecommender, 'analyze_preferences', return_value={'genres': [], 'directors': [], 'decades': []}), patch.object(main.MovieRecommender, 'get_recommendations', return_value=[]), patch.object(main, 'enrich_film_task', return_value={'title': 'A', 'user_rating': 4}):
         body = client.post('/api/recommend', json={'username': 'u'}).get_json()
     assert 'request_id' in body
+
+
+def test_get_all_rated_films_falls_back_to_stale_cache_when_live_scrape_fails():
+    r = main.MovieRecommender()
+
+    def fake_cache_get(namespace, key):
+        if key.endswith(':pages:v2'):
+            return None
+        if key.endswith(':pages:stale:v1'):
+            return {'films': [{'title': 'Stale Film', 'rating': 3.5, 'has_rating': True}], 'pages': 4}
+        return None
+
+    with patch.object(main.cache, 'get', side_effect=fake_cache_get), patch.object(r, 'get_page_count', return_value=0):
+        films, pages = r.get_all_rated_films('user')
+
+    assert pages == 4
+    assert films and films[0]['title'] == 'Stale Film'
+    assert r.used_stale_profile_cache is True
+
+
+def test_recommend_response_marks_stale_cache_usage():
+    client = main.app.test_client()
+
+    def fake_get_all(self, username, include_unrated=True, max_pages=None):
+        self.used_stale_profile_cache = True
+        return ([{'title': 'A', 'rating': 4}], 1)
+
+    with patch.object(main.MovieRecommender, 'get_all_rated_films', new=fake_get_all), patch.object(main.MovieRecommender, 'analyze_preferences', return_value={'genres': [], 'directors': [], 'decades': []}), patch.object(main.MovieRecommender, 'get_recommendations', return_value=[]), patch.object(main, 'enrich_film_task', return_value={'title': 'A', 'user_rating': 4}):
+        body = client.post('/api/recommend', json={'username': 'u'}).get_json()
+
+    assert body['data_freshness'] == 'stale_cache'
+
+
+def test_incident_tracker_opens_circuit_after_threshold():
+    tracker = main.IncidentTracker()
+    threshold = main.LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD
+
+    for _ in range(threshold):
+        tracker.record_letterboxd_result(success=False, status=403)
+
+    snap = tracker.snapshot()
+    assert snap['letterboxd_circuit_open'] is True
+    assert snap['letterboxd_consecutive_failures'] >= threshold
+
+
+def test_health_includes_incident_snapshot():
+    client = main.app.test_client()
+    resp = client.get('/_health')
+    body = resp.get_json()
+
+    assert resp.status_code == 200
+    assert body['status'] == 'ok'
+    assert 'incident' in body
+
+
+def test_recommend_503_exposes_incident_payload():
+    client = main.app.test_client()
+
+    with patch.object(main.MovieRecommender, 'get_all_rated_films', return_value=([], 0)):
+        resp = client.post('/api/recommend', json={'username': 'u'})
+
+    body = resp.get_json()
+    assert resp.status_code in (404, 503)
+    if resp.status_code == 503:
+        assert 'incident' in body
