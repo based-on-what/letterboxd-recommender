@@ -7,3 +7,5 @@ simple-justwatch-python-api
 redis
 gunicorn
 dotenv
+cloudscraper
+curl_cffi
