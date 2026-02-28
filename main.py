@@ -546,6 +546,9 @@ class MovieRecommender:
         if service == 'letterboxd':
             self._letterboxd_last_failures = []
 
+        last_status = None
+        merged_headers = dict(session.headers)
+
         for attempt in range(max_retries + 1):
             try:
                 merged_headers = dict(session.headers)
@@ -553,6 +556,7 @@ class MovieRecommender:
                     merged_headers.update(headers)
 
                 r = _request_with_fallback(session, url, params, merged_headers, 12, service)
+                last_status = r.status_code
 
                 if r.status_code == 200:
                     return r
@@ -609,9 +613,12 @@ class MovieRecommender:
             logger.warning(
                 "Letterboxd scraping failed after retries. "
                 f"cloudscraper_available={cloudscraper_session is not None}, "
+                f"curl_cffi_available={curl_requests is not None}, "
                 f"proxy_env_http={bool(os.getenv('HTTP_PROXY') or os.getenv('http_proxy'))}, "
                 f"proxy_env_https={bool(os.getenv('HTTPS_PROXY') or os.getenv('https_proxy'))}, "
-                f"last_failures={self._letterboxd_last_failures}"
+                f"user_agent={merged_headers.get('User-Agent', DEFAULT_USER_AGENT)}, "
+                f"last_status={last_status}, "
+                f"last_failures={self._letterboxd_last_failures[-8:]}"
             )
         return None
     
