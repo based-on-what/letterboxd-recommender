@@ -83,6 +83,7 @@ PROVIDER_NAME_MAP = {
 
 REQUEST_STREAMS = {}
 REQUEST_STREAMS_LOCK = Lock()
+STREAM_MAX_AGE_S = int(os.getenv('STREAM_MAX_AGE_S', '3600'))  # evict orphaned entries after 1h
 
 LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv('LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD', '5'))
 LETTERBOXD_CIRCUIT_COOLDOWN_S = int(os.getenv('LETTERBOXD_CIRCUIT_COOLDOWN_S', '180'))
@@ -134,6 +135,17 @@ INCIDENT_TRACKER = IncidentTracker()
 
 def _get_or_create_streams(request_id):
     with REQUEST_STREAMS_LOCK:
+        # Evict entries older than STREAM_MAX_AGE_S (handles abrupt client disconnects)
+        now = time.time()
+        stale = [
+            rid for rid, s in REQUEST_STREAMS.items()
+            if now - s.get('_created', now) > STREAM_MAX_AGE_S
+        ]
+        if stale:
+            for rid in stale:
+                REQUEST_STREAMS.pop(rid, None)
+            logger.debug(f"[stream-cleanup] evicted {len(stale)} stale stream entries")
+
         streams = REQUEST_STREAMS.get(request_id)
         if streams is None:
             streams = {
@@ -145,6 +157,7 @@ def _get_or_create_streams(request_id):
                 'status_connected': 0,
                 'recommendations_done': False,
                 'status_done': False,
+                '_created': now,
             }
             REQUEST_STREAMS[request_id] = streams
         return streams
@@ -266,14 +279,21 @@ class RateLimiter:
         self._last = 0.0
     
     def wait(self):
-        """Block until enough time has elapsed since the previous request."""
-        with self._lock:
-            now = time.time()
-            diff = now - self._last
-            if diff < self.min_interval:
+        """Block until enough time has elapsed since the previous request.
+
+        Releases the lock before sleeping so other threads can compute their
+        own slot concurrently instead of serializing behind one sleep call.
+        """
+        while True:
+            with self._lock:
+                now = time.time()
+                diff = now - self._last
+                if diff >= self.min_interval:
+                    self._last = now
+                    return
                 sleep_time = self.min_interval - diff
-                time.sleep(sleep_time)
-            self._last = time.time()
+            # Lock released here: parallel threads can each reserve their slot
+            time.sleep(sleep_time)
 
 
 # Conditional import of cache dependencies
@@ -1360,12 +1380,19 @@ def health():
 
 
 @app.route('/_incident-status', methods=['GET'])
+@limiter.limit('30 per minute')
 def incident_status():
     """Operational incident snapshot for alerting/diagnostics."""
+    expected = os.getenv('INTERNAL_TOKEN', '')
+    if expected:
+        provided = request.headers.get('X-Internal-Token', '')
+        if provided != expected:
+            return jsonify({'error': 'forbidden'}), 403
     return jsonify(INCIDENT_TRACKER.snapshot()), 200
 
 
 @app.route('/api/logs-stream', methods=['GET'])
+@limiter.limit('20 per minute')
 def logs_stream():
     """
     SSE endpoint that streams logs in real-time to the browser.
@@ -1402,6 +1429,7 @@ def logs_stream():
 
 
 @app.route('/api/recommendations-stream', methods=['GET'])
+@limiter.limit('20 per minute')
 def recommendations_stream():
     """SSE endpoint that streams recommendations in real-time to the browser."""
     request_id = request.args.get('request_id')
@@ -1439,6 +1467,7 @@ def recommendations_stream():
 
 
 @app.route('/api/status-stream', methods=['GET'])
+@limiter.limit('20 per minute')
 def status_stream():
     """SSE endpoint that streams currently analyzed movie metadata."""
     request_id = request.args.get('request_id')
@@ -1497,10 +1526,16 @@ def get_pages():
     Response JSON: {"pages": int}
     """
     payload = request.get_json() or {}
-    
+
+    username = (payload.get('username') or '').strip()
+    if not username:
+        return jsonify({'error': 'username is required'}), 400
+    if not re.match(r'^[a-zA-Z0-9_-]{1,50}$', username):
+        return jsonify({'error': 'invalid username format'}), 400
+
     try:
         recommender = MovieRecommender()
-        page_count = recommender.get_page_count(payload.get('username'))
+        page_count = recommender.get_page_count(username)
         return jsonify({'pages': page_count})
         
     except Exception as e:
@@ -1533,7 +1568,10 @@ def recommend():
     
     if not username:
         return jsonify({'error': 'username is required'}), 400
-    
+    username = username.strip()
+    if not re.match(r'^[a-zA-Z0-9_-]{1,50}$', username):
+        return jsonify({'error': 'invalid username format'}), 400
+
     try:
         rec_sys = MovieRecommender(country=data.get('country', 'CL'))
         
@@ -1557,8 +1595,6 @@ def recommend():
                     'username': username,
                     'request_id': request_id,
                     'hint': 'Try again in a few minutes. If it persists, use a deployment region/proxy with lower bot reputation risk.',
-                    'letterboxd_failures': failures,
-                    'incident': incident,
                 })
                 if incident.get('letterboxd_circuit_open'):
                     response.headers['Retry-After'] = str(incident.get('letterboxd_circuit_retry_after_s', 0))
@@ -1569,7 +1605,6 @@ def recommend():
                 'username': username,
                 'request_id': request_id,
                 'hint': 'Check backend logs for Letterboxd HTTP status / proxy diagnostics.',
-                'letterboxd_failures': failures,
             }), 404
         
         # Enrich with TMDB data
@@ -1761,11 +1796,7 @@ def recommend():
     except Exception as e:
         logger.exception("Error generating recommendations")
         elapsed = time.time() - start_time if 'start_time' in locals() else 0
-        return jsonify({
-            'error': str(e),
-            'elapsed_time': elapsed,
-            'message': 'An error occurred while generating recommendations'
-        }), 500
+        return jsonify({'error': 'internal server error'}), 500
 
 
 @app.route('/<username>')
