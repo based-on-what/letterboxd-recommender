@@ -361,32 +361,47 @@
     }
 
     // Compiled regex patterns for log-based progress detection (avoids re-compiling on each SSE event).
-    const _RE_SEED_COUNT   = /Total films with 4\+ stars:\s*(\d+)/i;
-    const _RE_FETCHED      = /Fetched\s+\d+\s+films/i;
-    const _RE_ENRICHED     = /Enrichment completed/i;
-    const _RE_DONE         = /Returning\s+\d+\s+recommendations|ANALYSIS COMPLETE/i;
+    const _RE_SEED_COUNT      = /Total films with 4\+ stars:\s*(\d+)/i;
+    const _RE_FETCHED         = /Fetched\s+\d+\s+films/i;
+    const _RE_ENRICH_PROGRESS = /Enrichment progress:\s*(\d+)\/(\d+)/i;
+    const _RE_ENRICHED        = /Enrichment completed/i;
+    const _RE_DONE            = /Returning\s+\d+\s+recommendations|ANALYSIS COMPLETE/i;
 
     function updateProgressFromLog(message) {
       const text = String(message || '');
 
-      const starMatch = _RE_SEED_COUNT.exec(text);
-      if (starMatch) {
-        totalSeedFilms = parseInt(starMatch[1], 10) || 0;
-        processedSeedFilms = 0;
-        setProgress(60, `Analyzing favorites: 0/${totalSeedFilms}`);
-        return;
-      }
-
+      // Phase: fetching profile (0→25%)
       if (_RE_FETCHED.test(text)) {
         setProgress(25, 'Profile fetched, enriching with TMDB...');
         return;
       }
 
+      // Phase: TMDB enrichment (25→55%) — updated on every progress log line
+      const enrichMatch = _RE_ENRICH_PROGRESS.exec(text);
+      if (enrichMatch) {
+        const done  = Number.parseInt(enrichMatch[1], 10);
+        const total = Number.parseInt(enrichMatch[2], 10) || 1;
+        const pct   = 25 + Math.round((done / total) * 30);
+        setProgress(pct, `Enriching with TMDB: ${done}/${total}`);
+        return;
+      }
+
+      // Phase: enrichment finished, preference analysis (55%)
       if (_RE_ENRICHED.test(text)) {
         setProgress(55, 'Preferences detected, preparing recommendations...');
         return;
       }
 
+      // Phase: similar-movie search begins (60%) + seed-film counter
+      const starMatch = _RE_SEED_COUNT.exec(text);
+      if (starMatch) {
+        totalSeedFilms = Number.parseInt(starMatch[1], 10) || 0;
+        processedSeedFilms = 0;
+        setProgress(60, `Analyzing favorites: 0/${totalSeedFilms}`);
+        return;
+      }
+
+      // Phase: done (100%)
       if (_RE_DONE.test(text)) {
         setProgress(100, 'Progress: 100%');
       }
