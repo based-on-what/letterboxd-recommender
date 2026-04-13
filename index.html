@@ -360,9 +360,16 @@
       box.scrollTop = box.scrollHeight;
     }
 
+    // Compiled regex patterns for log-based progress detection (avoids re-compiling on each SSE event).
+    const _RE_SEED_COUNT   = /Total films with 4\+ stars:\s*(\d+)/i;
+    const _RE_FETCHED      = /Fetched\s+\d+\s+films/i;
+    const _RE_ENRICHED     = /Enrichment completed/i;
+    const _RE_DONE         = /Returning\s+\d+\s+recommendations|ANALYSIS COMPLETE/i;
+
     function updateProgressFromLog(message) {
       const text = String(message || '');
-      const starMatch = text.match(/Total films with 4\+ stars:\s*(\d+)/i);
+
+      const starMatch = _RE_SEED_COUNT.exec(text);
       if (starMatch) {
         totalSeedFilms = parseInt(starMatch[1], 10) || 0;
         processedSeedFilms = 0;
@@ -370,17 +377,17 @@
         return;
       }
 
-      if (/Fetched\s+\d+\s+films/i.test(text)) {
+      if (_RE_FETCHED.test(text)) {
         setProgress(25, 'Profile fetched, enriching with TMDB...');
         return;
       }
 
-      if (/Enrichment completed/i.test(text)) {
+      if (_RE_ENRICHED.test(text)) {
         setProgress(55, 'Preferences detected, preparing recommendations...');
         return;
       }
 
-      if (/Returning\s+\d+\s+recommendations/i.test(text) || /ANALYSIS COMPLETE/i.test(text)) {
+      if (_RE_DONE.test(text)) {
         setProgress(100, 'Progress: 100%');
       }
     }

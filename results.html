@@ -648,24 +648,28 @@
       renderMovies();
     }
 
+    // Cache frequently accessed DOM nodes once the page is loaded.
+    let _grid, _resultsCounter;
+    function _getGrid() { return _grid || (_grid = document.getElementById('grid')); }
+    function _getCounter() { return _resultsCounter || (_resultsCounter = document.getElementById('resultsCounter')); }
+
     // Render the movie cards into the grid, honoring filters.
     function renderMovies() {
-      const grid = document.getElementById('grid');
+      const grid = _getGrid();
       grid.innerHTML = '';
-      
+
       let visibleCount = 0;
-      
+      const noStreamMsg = `❌ Movie not available on streaming services in ${userCountryName} ${countryCodeToFlag(userCountryCode)}`;
+
       moviesData.forEach((m, index) => {
         const div = document.createElement('div');
         div.className = 'movie-card';
         div.dataset.index = index;
-        
-        // Apply filters
+
+        // Apply platform filter
         if (selectedPlatforms.size > 0) {
-          const moviePlatforms = m.streaming || [];
-          const hasSelectedPlatform = moviePlatforms.some(p => selectedPlatforms.has(p));
-          
-          if (!hasSelectedPlatform) {
+          const hasSelected = (m.streaming || []).some(p => selectedPlatforms.has(p));
+          if (!hasSelected) {
             div.classList.add('hidden');
           } else {
             visibleCount++;
@@ -673,15 +677,15 @@
         } else {
           visibleCount++;
         }
-        
+
         const platforms = (m.streaming || [])
           .map(p => `<span class="platform">${p}</span>`)
           .join('');
-        
-        const streamHtml = platforms 
-          ? `<div class="streaming-sec">${platforms}</div>` 
-          : `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">❌ Movie not available on streaming services in ${userCountryName} ${countryCodeToFlag(userCountryCode)}</div>`;
-        
+
+        const streamHtml = platforms
+          ? `<div class="streaming-sec">${platforms}</div>`
+          : `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">${noStreamMsg}</div>`;
+
         const poster = m.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
         const runtime = m.runtime ? `${m.runtime} min` : 'N/A';
 
@@ -696,13 +700,11 @@
             ${streamHtml}
           </div>
         `;
-        
+
         grid.appendChild(div);
       });
-      
-      // Update counter
-      document.getElementById('resultsCounter').textContent = 
-        `Showing ${visibleCount} of ${moviesData.length} movies`;
+
+      _getCounter().textContent = `Showing ${visibleCount} of ${moviesData.length} movies`;
     }
 
     // Toggle a streaming platform filter and re-render the grid.

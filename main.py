@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 import unicodedata
 import re
 import queue
-from queue import Queue
+from functools import lru_cache
 from uuid import uuid4
 from flask import stream_with_context, Response
 try:
@@ -84,6 +84,8 @@ PROVIDER_NAME_MAP = {
 REQUEST_STREAMS = {}
 REQUEST_STREAMS_LOCK = Lock()
 STREAM_MAX_AGE_S = int(os.getenv('STREAM_MAX_AGE_S', '3600'))  # evict orphaned entries after 1h
+_STREAM_EVICTION_INTERVAL_S = 30.0  # scan for stale entries at most this often
+_last_stream_eviction_s = 0.0  # guarded by REQUEST_STREAMS_LOCK
 
 LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv('LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD', '5'))
 LETTERBOXD_CIRCUIT_COOLDOWN_S = int(os.getenv('LETTERBOXD_CIRCUIT_COOLDOWN_S', '180'))
@@ -134,24 +136,29 @@ INCIDENT_TRACKER = IncidentTracker()
 
 
 def _get_or_create_streams(request_id):
+    global _last_stream_eviction_s
     with REQUEST_STREAMS_LOCK:
-        # Evict entries older than STREAM_MAX_AGE_S (handles abrupt client disconnects)
         now = time.time()
-        stale = [
-            rid for rid, s in REQUEST_STREAMS.items()
-            if now - s.get('_created', now) > STREAM_MAX_AGE_S
-        ]
-        if stale:
-            for rid in stale:
-                REQUEST_STREAMS.pop(rid, None)
-            logger.debug(f"[stream-cleanup] evicted {len(stale)} stale stream entries")
+        # Throttle the full-scan eviction so it doesn't run on every log message.
+        # With dozens of threads logging concurrently, this was the dominant lock
+        # contention source.  A 30-second window is fine for 1-hour TTL entries.
+        if now - _last_stream_eviction_s >= _STREAM_EVICTION_INTERVAL_S:
+            stale = [
+                rid for rid, s in REQUEST_STREAMS.items()
+                if now - s.get('_created', now) > STREAM_MAX_AGE_S
+            ]
+            if stale:
+                for rid in stale:
+                    REQUEST_STREAMS.pop(rid, None)
+                logger.debug(f"[stream-cleanup] evicted {len(stale)} stale stream entries")
+            _last_stream_eviction_s = now
 
         streams = REQUEST_STREAMS.get(request_id)
         if streams is None:
             streams = {
-                'logs': Queue(),
-                'recommendations': Queue(),
-                'status': Queue(),
+                'logs': queue.Queue(),
+                'recommendations': queue.Queue(),
+                'status': queue.Queue(),
                 'logs_connected': 0,
                 'recommendations_connected': 0,
                 'status_connected': 0,
@@ -487,6 +494,7 @@ letterboxd_limiter = RateLimiter(min_interval=0.15)
 streaming_limiter = RateLimiter(min_interval=0.1)
 
 
+@lru_cache(maxsize=4096)
 def normalize_title(title):
     """
     Normalize a title string for resilient comparisons.
@@ -592,7 +600,51 @@ class MovieRecommender:
     def get_country_name(self):
         """Return the human-friendly name for the configured country."""
         return self.country_names.get(self.country, self.country)
-    
+
+    def _try_letterboxd_fallbacks(
+        self, url: str, params, merged_headers: dict, attempt: int, primary_status: int
+    ):
+        """Try cloudscraper then curl_cffi when the primary request gets blocked.
+
+        Records failures into self._letterboxd_last_failures so the post-loop
+        diagnostic log in _safe_get has full context.
+
+        Returns:
+            A 200 response object on success, or None if all fallbacks failed.
+        """
+        self._letterboxd_last_failures.append(
+            f"attempt={attempt + 1},status={primary_status},source=requests"
+        )
+
+        if cloudscraper_session is not None:
+            try:
+                alt = cloudscraper_session.get(url, params=params, headers=merged_headers, timeout=12)
+                if alt.status_code == 200:
+                    logger.info("Letterboxd request succeeded via cloudscraper fallback")
+                    return alt
+                self._letterboxd_last_failures.append(
+                    f"attempt={attempt + 1},status={alt.status_code},source=cloudscraper"
+                )
+                logger.warning(
+                    f"Cloudscraper non-200 response ({alt.status_code}) from {url} on attempt {attempt + 1}"
+                )
+            except requests.RequestException as exc:
+                self._letterboxd_last_failures.append(
+                    f"attempt={attempt + 1},error={type(exc).__name__},source=cloudscraper"
+                )
+                logger.debug(f"Cloudscraper request error (attempt {attempt + 1}): {exc}")
+
+        curl_resp = _curl_letterboxd_get(url, params, merged_headers, 12)
+        if curl_resp is not None:
+            if getattr(curl_resp, 'status_code', None) == 200:
+                logger.info("Letterboxd request succeeded via curl_cffi fallback")
+                return curl_resp
+            self._letterboxd_last_failures.append(
+                f"attempt={attempt + 1},status={getattr(curl_resp, 'status_code', 'n/a')},source=curl_cffi"
+            )
+
+        return None
+
     def _safe_get(self, url, params=None, headers=None, max_retries=2, service='generic'):
         """
         Issue an HTTP GET with rate limiting and retries.
@@ -620,7 +672,7 @@ class MovieRecommender:
                 return None
 
         last_status = None
-        merged_headers = dict(session.headers)
+        merged_headers = {}
 
         for attempt in range(max_retries + 1):
             try:
@@ -637,33 +689,11 @@ class MovieRecommender:
                     return r
 
                 if service == 'letterboxd' and r.status_code in (403, 429, 503):
-                    self._letterboxd_last_failures.append(f"attempt={attempt + 1},status={r.status_code},source=requests")
-                    if cloudscraper_session is not None:
-                        try:
-                            alt = cloudscraper_session.get(url, params=params, headers=merged_headers, timeout=12)
-                            if alt.status_code == 200:
-                                logger.info("Letterboxd request succeeded via cloudscraper fallback")
-                                return alt
-                            self._letterboxd_last_failures.append(
-                                f"attempt={attempt + 1},status={alt.status_code},source=cloudscraper"
-                            )
-                            logger.warning(
-                                f"Cloudscraper non-200 response ({alt.status_code}) from {url} on attempt {attempt + 1}"
-                            )
-                        except requests.RequestException as exc:
-                            self._letterboxd_last_failures.append(
-                                f"attempt={attempt + 1},error={type(exc).__name__},source=cloudscraper"
-                            )
-                            logger.debug(f"Cloudscraper request error (attempt {attempt + 1}): {exc}")
-
-                    curl_resp = _curl_letterboxd_get(url, params, merged_headers, 12)
-                    if curl_resp is not None:
-                        if getattr(curl_resp, 'status_code', None) == 200:
-                            logger.info("Letterboxd request succeeded via curl_cffi fallback")
-                            return curl_resp
-                        self._letterboxd_last_failures.append(
-                            f"attempt={attempt + 1},status={getattr(curl_resp, 'status_code', 'n/a')},source=curl_cffi"
-                        )
+                    fallback = self._try_letterboxd_fallbacks(
+                        url, params, merged_headers, attempt, r.status_code
+                    )
+                    if fallback is not None:
+                        return fallback
 
                 if r.status_code == 429:
                     sleep_time = (attempt + 1) * 1.5
@@ -732,7 +762,44 @@ class MovieRecommender:
         except Exception as e:
             logger.error(f"Error retrieving page count: {e}")
             return 0
-    
+
+    def _scrape_profile_page(self, page: int, base_url: str, headers: dict, rating_map: dict) -> list:
+        """Scrape a single Letterboxd profile page and return its film list."""
+        url = f"{base_url}page/{page}/" if page > 1 else base_url
+        r = self._safe_get(url, headers=headers, service='letterboxd')
+        if not r:
+            return []
+
+        soup = BeautifulSoup(r.text, 'html.parser')
+        items = (soup.find_all('li', class_='poster-container')
+                 or soup.find_all('li', class_='griditem'))
+
+        page_films = []
+        for item in items:
+            try:
+                img = item.find('img', alt=True)
+                if not img:
+                    continue
+                name = img.get('alt')
+                rating = 0.0
+                viewingdata = item.find('p', class_='poster-viewingdata')
+                if viewingdata:
+                    r_span = viewingdata.find('span', class_='rating')
+                    if r_span:
+                        for cls in r_span.get('class', []):
+                            if cls in rating_map:
+                                rating = rating_map[cls]
+                                break
+                if name:
+                    page_films.append({
+                        'title': name.strip(),
+                        'rating': rating,
+                        'has_rating': rating > 0,
+                    })
+            except Exception as e:
+                logger.debug(f"Error processing film item: {e}")
+        return page_films
+
     def get_all_rated_films(self, username, max_pages=None, include_unrated=True):
         """
         Scrape every film listed in a user's profile.
@@ -784,58 +851,15 @@ class MovieRecommender:
 
             rating_map = {f'rated-{i}': i / 2.0 for i in range(1, 11)}
             headers = dict(LETTERBOXD_HEADERS)
-            
-            def scrape_page(page):
-                """Scrape a single profile page."""
-                url = f"{base_url}page/{page}/" if page > 1 else base_url
-                r = self._safe_get(url, headers=headers, service='letterboxd')
-                
-                if not r:
-                    return []
-                
-                soup = BeautifulSoup(r.text, 'html.parser')
-                items = soup.find_all('li', class_='poster-container') or \
-                        soup.find_all('li', class_='griditem')
-                
-                page_films = []
-                
-                for item in items:
-                    try:
-                        img = item.find('img', alt=True)
-                        if not img:
-                            continue
-                        
-                        name = img.get('alt')
-                        rating = 0.0
-                        
-                        viewingdata = item.find('p', class_='poster-viewingdata')
-                        if viewingdata:
-                            r_span = viewingdata.find('span', class_='rating')
-                            if r_span:
-                                for cls in r_span.get('class', []):
-                                    if cls in rating_map:
-                                        rating = rating_map[cls]
-                                        break
-                        
-                        if name:
-                            film_data = {
-                                'title': name.strip(),
-                                'rating': rating,
-                                'has_rating': rating > 0
-                            }
-                            page_films.append(film_data)
-                            
-                    except Exception as e:
-                        logger.debug(f"Error processing film: {e}")
-                        continue
-                
-                return page_films
-            
+
             films = []
             logger.info(f"Scraping {pages} pages from {username}'s profile")
-            
+
             with ThreadPoolExecutor(max_workers=min(self.max_workers, 6)) as ex:
-                futures = [ex.submit(scrape_page, p) for p in range(1, pages + 1)]
+                futures = [
+                    ex.submit(self._scrape_profile_page, p, base_url, headers, rating_map)
+                    for p in range(1, pages + 1)
+                ]
                 completed_pages = 0
                 progress_interval = max(1, pages // 10)
                 for f in as_completed(futures):
@@ -1030,24 +1054,23 @@ class MovieRecommender:
         seen_ids = set()
         seen_titles_norm = set()
         
-        logger.info("=== USER FILMS ===")
         for film in enriched_films:
             if film.get('tmdb_id'):
                 seen_ids.add(str(film['tmdb_id']))
-            
+
             title_norm = normalize_title(film.get('title', ''))
             if title_norm:
                 seen_titles_norm.add(title_norm)
-            
+
             if film.get('original_title'):
                 orig_norm = normalize_title(film.get('original_title'))
                 if orig_norm:
                     seen_titles_norm.add(orig_norm)
-            
+
             rating_display = f"{film.get('user_rating', 0):.1f}★" if film.get('user_rating', 0) > 0 else "Unrated"
-            logger.info(f"  • {film.get('title', 'Untitled')} [{film.get('year', '????')}] "
-                        f"- TMDB ID: {film.get('tmdb_id', 'N/A')} - Rating: {rating_display}")
-        
+            logger.debug(f"  • {film.get('title', 'Untitled')} [{film.get('year', '????')}] "
+                         f"- TMDB ID: {film.get('tmdb_id', 'N/A')} - Rating: {rating_display}")
+
         logger.info(f"Total watched films: {len(enriched_films)} "
                    f"(Unique IDs: {len(seen_ids)}, Normalized titles: {len(seen_titles_norm)})")
         
@@ -1095,130 +1118,22 @@ class MovieRecommender:
                 logger.warning(f"Could not build debug export payload: {e}")
         
         for idx, film in enumerate(highly_rated_films, 1):
-            logger.info(f"  {idx}. {film.get('title')} [{film.get('year')}] - "
-                       f"{film.get('user_rating')}★ (TMDB: {film.get('rating_tmdb', 'N/A')})")
+            logger.debug(f"  {idx}. {film.get('title')} [{film.get('year')}] - "
+                        f"{film.get('user_rating')}★ (TMDB: {film.get('rating_tmdb', 'N/A')})")
         
         logger.info(f"\nStarting parallel processing of {len(highly_rated_films)} films...")
         
         logger.info(f"\n=== LOOKING FOR SIMILAR MOVIES ===")
-        
-        def process_similar(film):
-            """Collect similar movies for a given seed title."""
-            if stream_queues is not None:
-                stream_queues['status'].put({
-                    'title': film.get('title', 'Untitled'),
-                    'user_rating': film.get('user_rating', 0),
-                    'username': username or 'user',
-                })
 
-            if not film.get('tmdb_id'):
-                logger.info(f"[SKIP] {film.get('title')} - No TMDB ID")
-                return []
-            
-            logger.info(f"[PROCESSING] {film.get('title')} (TMDB ID: {film.get('tmdb_id')})")
-            
-            cache_key = f"similar:{film.get('tmdb_id')}"
-            
-            if not force_refresh:
-                cached = cache.get('similar', cache_key)
-                if cached:
-                    logger.info(f"  [CACHED] {film.get('title')} - Found {len(cached)} results in cache")
-                    return cached
-            
-            try:
-                resp = self._tmdb_get(f"/movie/{film['tmdb_id']}/similar")
-                
-                if not resp:
-                    return []
-                
-                local = []
-                results = resp.json().get('results', [])[:SIMILAR_RESULTS_PER_FILM]
-                
-                for m in results:
-                    mid = m.get('id')
-                    title = m.get('title')
-                    
-                    if not title:
-                        continue
-                    
-                    title_norm = normalize_title(title)
-                    
-                    if str(mid) in seen_ids:
-                        logger.debug(f"  ✗ {title} - Already seen (ID match)")
-                        continue
-                    
-                    if title_norm in seen_titles_norm:
-                        logger.debug(f"  ✗ {title} - Already seen (title match)")
-                        continue
-                    
-                    det = self.get_tmdb_details_by_id(mid, force_refresh)
-                    
-                    if not det:
-                        continue
-                    
-                    # Filter immediately by TMDB rating
-                    if det.get('rating_tmdb') is None or float(det.get('rating_tmdb', 0)) < MIN_RECOMMEND_RATING:
-                        logger.debug(f"  ✗ {det.get('title')} - Rating too low ({det.get('rating_tmdb', 'N/A')} < {MIN_RECOMMEND_RATING})")
-                        continue
-                    
-                    det_title_norm = normalize_title(det.get('title', ''))
-                    det_orig_norm = normalize_title(det.get('original_title', ''))
-                    
-                    if (str(det.get('tmdb_id')) in seen_ids or 
-                        det_title_norm in seen_titles_norm or 
-                        det_orig_norm in seen_titles_norm):
-                        logger.debug(f"  ✗ {det.get('title')} - Already seen (secondary check)")
-                        continue
-                    
-                    det['reason'] = f"Since you liked {film.get('title')}"
-                    
-                    # Fetch streaming info (prefer TMDB providers by ID)
-                    streaming = []
-                    try:
-                        if det.get('tmdb_id'):
-                            streaming = self.get_streaming_by_tmdb(det.get('tmdb_id'))
-                        if not streaming:
-                            streaming = self.get_streaming(det.get('title'), det.get('year'))
-                    except Exception as e:
-                        logger.debug(f"Could not fetch streaming for {det.get('title')}: {e}")
-                    
-                    # Add streaming to the cached object
-                    det['streaming'] = streaming
-                    
-                    # Add candidate with streaming information
-                    local.append(det)
-                    logger.debug(f"  ✓ {det.get('title')} - Valid candidate (rating: {det.get('rating_tmdb')}, streaming: {len(streaming)} providers)")
-                    
-                    # Stream recommendation in real time with streaming data
-                    try:
-                        if stream_queues is not None:
-                            stream_queues['recommendations'].put({
-                            'title': det.get('title'),
-                            'year': det.get('year'),
-                            'rating_tmdb': det.get('rating_tmdb'),
-                            'poster': det.get('poster'),
-                            'director': det.get('director'),
-                            'genres': det.get('genres', []),
-                            'runtime': det.get('runtime', 0),
-                            'streaming': streaming,
-                            'reason': det['reason']
-                        })
-                    except Exception as exc:
-                        logger.debug(f"Unable to stream recommendation event: {exc}")
-                
-                cache.set('similar', cache_key, local, ttl=ONE_DAY)
-                logger.info(f"  ↳ {len(local)} new movies found")
-                
-                return local
-                
-            except Exception as e:
-                logger.error(f"Error searching similar movies: {e}")
-                return []
-        
         # Process all highly-rated films in parallel
-        # Reduce workers to avoid rate limiting and timeouts
         with ThreadPoolExecutor(max_workers=min(SIMILAR_WORKERS, self.max_workers)) as ex:
-            futures = [ex.submit(process_similar, f) for f in highly_rated_films]
+            futures = [
+                ex.submit(
+                    self._get_similar_for_film,
+                    film, seen_ids, seen_titles_norm, stream_queues, force_refresh, username,
+                )
+                for film in highly_rated_films
+            ]
             for f in as_completed(futures):
                 recs.extend(f.result())
         
@@ -1242,7 +1157,127 @@ class MovieRecommender:
         logger.info(f"Returning {len(filtered)} recommendations")
         
         return filtered if count is None else filtered[:count]
-    
+
+    def _get_similar_for_film(
+        self,
+        film: dict,
+        seen_ids: set,
+        seen_titles_norm: set,
+        stream_queues,
+        force_refresh: bool,
+        username,
+    ) -> list:
+        """Fetch and filter TMDB similar-movie candidates for a single seed film.
+
+        Called in parallel by get_recommendations.  Returns a list of candidate
+        dicts (with streaming already populated) that passed all filters and are
+        not in the user's already-seen sets.
+        """
+        if stream_queues is not None:
+            stream_queues['status'].put({
+                'title': film.get('title', 'Untitled'),
+                'user_rating': film.get('user_rating', 0),
+                'username': username or 'user',
+            })
+
+        if not film.get('tmdb_id'):
+            logger.info(f"[SKIP] {film.get('title')} - No TMDB ID")
+            return []
+
+        logger.info(f"[PROCESSING] {film.get('title')} (TMDB ID: {film.get('tmdb_id')})")
+
+        cache_key = f"similar:{film.get('tmdb_id')}"
+        if not force_refresh:
+            cached = cache.get('similar', cache_key)
+            if cached:
+                logger.info(f"  [CACHED] {film.get('title')} - Found {len(cached)} results in cache")
+                return cached
+
+        try:
+            resp = self._tmdb_get(f"/movie/{film['tmdb_id']}/similar")
+            if not resp:
+                return []
+
+            local = []
+            results = resp.json().get('results', [])[:SIMILAR_RESULTS_PER_FILM]
+
+            for m in results:
+                mid = m.get('id')
+                title = m.get('title')
+                if not title:
+                    continue
+
+                title_norm = normalize_title(title)
+                if str(mid) in seen_ids:
+                    logger.debug(f"  ✗ {title} - Already seen (ID match)")
+                    continue
+                if title_norm in seen_titles_norm:
+                    logger.debug(f"  ✗ {title} - Already seen (title match)")
+                    continue
+
+                det = self.get_tmdb_details_by_id(mid, force_refresh)
+                if not det:
+                    continue
+
+                if det.get('rating_tmdb') is None or float(det.get('rating_tmdb', 0)) < MIN_RECOMMEND_RATING:
+                    logger.debug(
+                        f"  ✗ {det.get('title')} - Rating too low "
+                        f"({det.get('rating_tmdb', 'N/A')} < {MIN_RECOMMEND_RATING})"
+                    )
+                    continue
+
+                det_title_norm = normalize_title(det.get('title', ''))
+                det_orig_norm = normalize_title(det.get('original_title', ''))
+                if (
+                    str(det.get('tmdb_id')) in seen_ids
+                    or det_title_norm in seen_titles_norm
+                    or det_orig_norm in seen_titles_norm
+                ):
+                    logger.debug(f"  ✗ {det.get('title')} - Already seen (secondary check)")
+                    continue
+
+                det['reason'] = f"Since you liked {film.get('title')}"
+
+                streaming = []
+                try:
+                    if det.get('tmdb_id'):
+                        streaming = self.get_streaming_by_tmdb(det.get('tmdb_id'))
+                    if not streaming:
+                        streaming = self.get_streaming(det.get('title'), det.get('year'))
+                except Exception as e:
+                    logger.debug(f"Could not fetch streaming for {det.get('title')}: {e}")
+
+                det['streaming'] = streaming
+                local.append(det)
+                logger.debug(
+                    f"  ✓ {det.get('title')} - Valid candidate "
+                    f"(rating: {det.get('rating_tmdb')}, streaming: {len(streaming)} providers)"
+                )
+
+                if stream_queues is not None:
+                    try:
+                        stream_queues['recommendations'].put({
+                            'title': det.get('title'),
+                            'year': det.get('year'),
+                            'rating_tmdb': det.get('rating_tmdb'),
+                            'poster': det.get('poster'),
+                            'director': det.get('director'),
+                            'genres': det.get('genres', []),
+                            'runtime': det.get('runtime', 0),
+                            'streaming': streaming,
+                            'reason': det['reason'],
+                        })
+                    except Exception as exc:
+                        logger.debug(f"Unable to stream recommendation event: {exc}")
+
+            cache.set('similar', cache_key, local, ttl=ONE_DAY)
+            logger.info(f"  ↳ {len(local)} new movies found")
+            return local
+
+        except Exception as e:
+            logger.error(f"Error searching similar movies: {e}")
+            return []
+
     def get_streaming(self, title, year=None, force_refresh=False):
         """
         Fetch streaming providers where a movie is available.
@@ -1676,21 +1711,11 @@ def recommend():
         )
         logger.info(f"Recommendations generated in {time.time() - rec_start:.2f}s")
         
-        # Retrieve streaming information if requested
-        if data.get('include_streaming', True) and recommendations:
-            # Streaming info is already fetched during recommendation processing
-            # Ensure every recommendation has this field using TMDB ID when available
-            for r in recommendations:
-                if not r.get('streaming'):
-                    try:
-                        if r.get('tmdb_id'):
-                            r['streaming'] = rec_sys.get_streaming_by_tmdb(r.get('tmdb_id')) or []
-                        if not r.get('streaming'):
-                            r['streaming'] = rec_sys.get_streaming(r.get('title'), r.get('year')) or []
-                    except Exception as e:
-                        logger.debug(f"Error fetching streaming data: {e}")
-                        r['streaming'] = []
-        else:
+        # Streaming is resolved inline by get_recommendations; ensure the field
+        # always exists and strip it when the caller opts out.
+        for r in recommendations:
+            r.setdefault('streaming', [])
+        if not data.get('include_streaming', True):
             for r in recommendations:
                 r['streaming'] = []
         
@@ -1779,6 +1804,7 @@ def recommend():
         response_payload = {
             'username': username,
             'country_name': rec_sys.get_country_name(),
+            'country_code': rec_sys.country,
             'pages': pages,
             'preferences': preferences,
             'recommendations': recommendations,
