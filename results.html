@@ -3,14 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Results</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <title>Letterboxd Recommender</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
     body {
       background-color: #121212;
       color: #e0e0e0;
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
       padding: 20px;
       line-height: 1.6;
     }
@@ -346,24 +348,55 @@
     }
     
     /* Responsive */
+    .pref-chip {
+      display: inline-block;
+      border: 1px solid #00e054;
+      color: #00e054;
+      font-size: 0.72rem;
+      padding: 2px 9px;
+      border-radius: 999px;
+      margin: 2px 3px 2px 0;
+    }
+    .results-counter {
+      min-height: 2rem;
+    }
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
     @media (max-width: 768px) {
       .header-info {
         margin-top: 80px;
       }
-      
       .movies-grid {
         grid-template-columns: repeat(2, 1fr);
       }
-      
       .platform-filters, .sort-buttons {
         justify-content: center;
       }
-      
-      .final-timer, .export-button, .live-status {
-        position: static;
-        margin: 10px auto;
-        display: block;
-        width: fit-content;
+      .export-button {
+        top: 0; left: 0; right: auto;
+        border-radius: 0 0 8px 0;
+        padding: 8px 14px;
+        font-size: 0.8rem;
+      }
+      .final-timer {
+        top: 0; right: 0; left: auto;
+        border-radius: 0 0 0 8px;
+        padding: 8px 14px;
+        font-size: 0.8rem;
+      }
+      .live-status {
+        top: 44px; left: 0; right: 0;
+        max-width: 100%;
+        border-radius: 0;
       }
     }
     
@@ -455,8 +488,20 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script>
+    function getPlatformStyle(platform) {
+      const p = platform.toLowerCase();
+      if (p.includes('netflix'))                       return 'background:#E50914;color:#fff';
+      if (p.includes('disney'))                        return 'background:#113CCF;color:#fff';
+      if (p.includes('prime') || p.includes('amazon')) return 'background:#00A8E0;color:#000';
+      if (p.includes('hbo') || p.includes('max'))     return 'background:#5822B4;color:#fff';
+      if (p.includes('apple'))                         return 'background:#333;color:#fff';
+      if (p.includes('hulu'))                          return 'background:#1CE783;color:#000';
+      if (p.includes('paramount'))                     return 'background:#0064FF;color:#fff';
+      return 'background:#00e054;color:#000';
+    }
+
     // Global variables
-    const username = window.location.pathname.substring(1); 
+    const username = window.location.pathname.substring(1);
     let moviesData = [];
     let originalMoviesData = [];
     let selectedPlatforms = new Set();
@@ -607,13 +652,12 @@
       document.getElementById('pageSub').textContent = 
         `Based on your profile. Region: ${userCountryName} ${countryCodeToFlag(userCountryCode)}`;
       
-      // Render preferences
-      document.getElementById('p-genres').textContent = 
-        (data.preferences?.genres || []).join(', ') || 'N/A';
-      document.getElementById('p-directors').textContent = 
-        (data.preferences?.directors || []).join(', ') || 'N/A';
-      document.getElementById('p-decades').textContent = 
-        (data.preferences?.decades || []).join(', ') || 'N/A';
+      const toChips = arr => arr.length
+        ? arr.map(v => `<span class="pref-chip">${v}</span>`).join('')
+        : 'N/A';
+      document.getElementById('p-genres').innerHTML   = toChips(data.preferences?.genres    || []);
+      document.getElementById('p-directors').innerHTML = toChips(data.preferences?.directors || []);
+      document.getElementById('p-decades').innerHTML  = toChips(data.preferences?.decades   || []);
 
       // Extract all unique streaming platforms
       const allPlatforms = new Set();
@@ -644,14 +688,25 @@
         platformContainer.appendChild(label);
       });
 
-      // Render movies
       renderMovies();
+      animateEntrance();
     }
 
     // Cache frequently accessed DOM nodes once the page is loaded.
     let _grid, _resultsCounter;
+    let _hasAnimated = false;
     function _getGrid() { return _grid || (_grid = document.getElementById('grid')); }
     function _getCounter() { return _resultsCounter || (_resultsCounter = document.getElementById('resultsCounter')); }
+
+    function animateEntrance() {
+      const els = ['.header-info', '.preferences', '.controls-section', '.results-counter', '.movies-grid'];
+      els.forEach((sel, i) => {
+        const el = document.querySelector(sel);
+        if (!el) return;
+        el.style.opacity = '0';
+        el.style.animation = `fadeSlideIn 400ms cubic-bezier(0.25, 1, 0.5, 1) ${i * 70}ms forwards`;
+      });
+    }
 
     // Render the movie cards into the grid, honoring filters.
     function renderMovies() {
@@ -659,6 +714,7 @@
       grid.innerHTML = '';
 
       let visibleCount = 0;
+      let renderIdx = 0;
       const noStreamMsg = `❌ Movie not available on streaming services in ${userCountryName} ${countryCodeToFlag(userCountryCode)}`;
 
       moviesData.forEach((m, index) => {
@@ -666,20 +722,22 @@
         div.className = 'movie-card';
         div.dataset.index = index;
 
-        // Apply platform filter
-        if (selectedPlatforms.size > 0) {
-          const hasSelected = (m.streaming || []).some(p => selectedPlatforms.has(p));
-          if (!hasSelected) {
-            div.classList.add('hidden');
-          } else {
-            visibleCount++;
-          }
+        const isVisible = selectedPlatforms.size === 0 ||
+          (m.streaming || []).some(p => selectedPlatforms.has(p));
+
+        if (!isVisible) {
+          div.classList.add('hidden');
         } else {
           visibleCount++;
+          if (!_hasAnimated) {
+            div.style.opacity = '0';
+            div.style.animation = `fadeSlideIn 350ms cubic-bezier(0.25, 1, 0.5, 1) ${Math.min(renderIdx * 50, 700)}ms both`;
+            renderIdx++;
+          }
         }
 
         const platforms = (m.streaming || [])
-          .map(p => `<span class="platform">${p}</span>`)
+          .map(p => `<span class="platform" style="${getPlatformStyle(p)}">${p}</span>`)
           .join('');
 
         const streamHtml = platforms
@@ -705,6 +763,7 @@
       });
 
       _getCounter().textContent = `Showing ${visibleCount} of ${moviesData.length} movies`;
+      _hasAnimated = true;
     }
 
     // Toggle a streaming platform filter and re-render the grid.

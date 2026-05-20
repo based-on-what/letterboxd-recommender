@@ -3,12 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Letterboxd Recommender Pro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <title>Letterboxd Recommender</title>
   <style>
     body {
       background-color: #121212;
       color: #e0e0e0;
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -58,7 +60,7 @@
     button:disabled { background: #555; cursor: wait; transform: none; }
     
     .loading-box { display: none; margin-top: 25px; }
-    .timer { font-size: 1.5rem; color: #ffbd00; font-weight: bold; margin-bottom: 10px;}
+    .timer { font-size: 1.5rem; color: #ffbd00; font-weight: bold; margin-bottom: 10px; font-family: 'Consolas', monospace; }
     .status { color: #888; font-size: 0.9rem; }
     .progress-wrap {
       width: 100%;
@@ -104,6 +106,7 @@
       white-space: pre-wrap;
       line-height: 1.35;
       margin-bottom: 4px;
+      font-family: 'Consolas', monospace;
     }
     
     .recommendations-live {
@@ -188,6 +191,41 @@
       margin: 2px;
       font-weight: bold;
     }
+    .input-row {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .input-row input { margin-top: 0; }
+    .input-row button { margin-top: 0; }
+    input:focus {
+      outline: none;
+      border-color: #00e054;
+      box-shadow: 0 0 0 3px rgba(0, 224, 84, 0.15);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    button:active:not(:disabled) { transform: scale(0.96) !important; }
+    .country-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid #2a2a2a;
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 0.82rem;
+      color: #aaa;
+      margin-bottom: 20px;
+    }
+    @keyframes pageFadeOut {
+      to { opacity: 0; }
+    }
+    .page-exiting {
+      animation: pageFadeOut 200ms ease forwards;
+      pointer-events: none;
+    }
     @keyframes slideIn {
       from {
         opacity: 0;
@@ -198,24 +236,33 @@
         transform: translateY(0);
       }
     }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="input-section">
     <h1>🎬 Letterboxd Recommender</h1>
+    <p style="color: #aaa; margin: 6px 0 20px; font-size: 0.9rem;">Personalized picks from your Letterboxd profile</p>
     <div style="color: #666; margin-bottom: 15px; font-size: 0.85rem;">
       Coded by <a href="https://github.com/based-on-what/letterboxd-recommender" target="_blank" rel="noopener noreferrer" style="color: #00e054; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='#00ff5e'" onmouseout="this.style.color='#00e054'">@based-on-what</a>
     </div>
     <div style="color: #888; margin-bottom: 20px; font-size: 0.9rem;">
       Enter your username to generate a permanent link.
     </div>
-    <div id="country-info" style="color: #888; margin-bottom: 20px; font-size: 0.9rem;">
+    <div id="country-info" class="country-pill">
       📍 Searching movie recommendations in: -- 🌍
     </div>
     
-    <input type="text" id="username" placeholder="Username (e.g. davidehrlich)" onkeypress="if(event.key==='Enter')startProcess()">
-    <br>
-    <button id="btn" onclick="startProcess()">Generate Recommendations</button>
+    <div class="input-row">
+      <input type="text" id="username" placeholder="e.g. davidehrlich" onkeypress="if(event.key==='Enter')startProcess()">
+      <button id="btn" onclick="startProcess()">Generate Recommendations</button>
+    </div>
     <button id="recommendations-btn" style="display: none; width: 280px; margin: 0 auto; margin-top: 30px;" onclick="navigateToRecommendations()"></button>
 
     <div id="loading" class="loading-box">
@@ -249,6 +296,18 @@
     let shownMovieIds = new Set(); // Track movie IDs already displayed to prevent duplicates
     let totalSeedFilms = 0;
     let processedSeedFilms = 0;
+
+    function getPlatformStyle(platform) {
+      const p = platform.toLowerCase();
+      if (p.includes('netflix'))                    return 'background:#E50914;color:#fff';
+      if (p.includes('disney'))                     return 'background:#113CCF;color:#fff';
+      if (p.includes('prime') || p.includes('amazon')) return 'background:#00A8E0;color:#000';
+      if (p.includes('hbo') || p.includes('max'))  return 'background:#5822B4;color:#fff';
+      if (p.includes('apple'))                      return 'background:#333;color:#fff';
+      if (p.includes('hulu'))                       return 'background:#1CE783;color:#000';
+      if (p.includes('paramount'))                  return 'background:#0064FF;color:#fff';
+      return 'background:#00e054;color:#000';
+    }
 
     // Convert an ISO country code into its flag emoji.
     function countryCodeToFlag(countryCode) {
@@ -484,16 +543,17 @@
       
       const card = document.createElement('div');
       card.className = 'movie-card';
-      
+      const staggerDelay = Math.min((liveRecommendations.length - 1) * 60, 180);
+      card.style.animation = `slideIn 350ms cubic-bezier(0.25, 1, 0.5, 1) ${staggerDelay}ms both`;
+
       const posterUrl = movie.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
       const runtime = movie.runtime ? `${movie.runtime} min` : 'N/A';
       const director = movie.director || 'Unknown';
 
-      // Prepare streaming HTML identical to results.html
       let streamingHtml = '';
       if (movie.streaming && movie.streaming.length > 0) {
         const platforms = movie.streaming
-          .map(p => `<span class="platform">${p}</span>`)
+          .map(p => `<span class="platform" style="${getPlatformStyle(p)}">${p}</span>`)
           .join('');
         streamingHtml = `<div class="streaming-sec">${platforms}</div>`;
       } else {
@@ -584,12 +644,11 @@
         document.getElementById('loading').style.display = 'none';
         document.getElementById('btn').style.display = 'none';
         
-        // Disconnect from logs stream
         disconnectFromLogsStream();
-        
-        // Disconnect from recommendations stream
-        disconnectFromRecommendationsStream();
         disconnectFromStatusStream();
+        // Let the SSE stream drain naturally (self-closes on 'complete').
+        // Force-close after 3 s as a safety net if 'DONE' never arrives.
+        setTimeout(() => disconnectFromRecommendationsStream(), 3000);
         setProgress(100, 'Progress: 100%');
         
         // Show and configure the recommendations button
@@ -614,7 +673,8 @@
     // Redirect to the results page for the current user.
     function navigateToRecommendations() {
       if (window.currentUsername) {
-        window.location.href = `/${window.currentUsername}`;
+        document.body.classList.add('page-exiting');
+        setTimeout(() => { window.location.href = `/${window.currentUsername}`; }, 200);
       }
     }
 

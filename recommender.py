@@ -97,6 +97,11 @@ try:
 except ImportError:
     curl_requests = None
 
+try:
+    from camoufox.sync_api import Camoufox as _Camoufox
+except ImportError:
+    _Camoufox = None
+
 
 # ---------------------------------------------------------------------------
 # IncidentTracker
@@ -199,6 +204,28 @@ def _curl_letterboxd_get(url, params, headers, timeout):
         )
     except Exception as exc:
         logger.debug(f"curl_cffi fallback error: {exc}")
+        return None
+
+
+def _camoufox_letterboxd_get(url, params, timeout):
+    """Full headless browser fallback using Camoufox (patched Firefox, C++-level fingerprint spoofing)."""
+    if _Camoufox is None:
+        return None
+    try:
+        from urllib.parse import urlencode
+        full_url = f"{url}?{urlencode(params)}" if params else url
+        with _Camoufox(headless=True, geoip=True) as browser:
+            page = browser.new_page()
+            page.goto(full_url, timeout=timeout * 1000)
+            html = page.content()
+
+        class _FakeResponse:
+            status_code = 200
+            text = html
+
+        return _FakeResponse()
+    except Exception as exc:
+        logger.debug(f"camoufox fallback error: {exc}")
         return None
 
 
@@ -399,6 +426,14 @@ class MovieRecommender:
                 logger.warning('Letterboxd circuit breaker open; skipping live scrape attempt')
                 return None
 
+            camoufox_resp = _camoufox_letterboxd_get(url, params, 20)
+            if camoufox_resp is not None:
+                logger.info("Letterboxd request succeeded via camoufox (primary)")
+                INCIDENT_TRACKER.record_letterboxd_result(success=True, status=200)
+                return camoufox_resp
+            logger.debug("Camoufox primary attempt failed, falling back to requests chain")
+            self._letterboxd_last_failures.append("primary,status=fail,source=camoufox")
+
         last_status = None
         merged_headers = {}
 
@@ -505,10 +540,17 @@ class MovieRecommender:
         page_films = []
         for item in items:
             try:
-                img = item.find('img', alt=True)
-                if not img:
-                    continue
-                name = img.get('alt')
+                poster_div = item.find(attrs={'data-film-name': True})
+                if poster_div:
+                    name = poster_div.get('data-film-name')
+                else:
+                    img = item.find('img', alt=True)
+                    if not img:
+                        continue
+                    alt = img.get('alt', '')
+                    # Letterboxd changed alt text to "Poster for TITLE (YEAR)"
+                    m = re.match(r'^Poster for (.+?)(?:\s*\(\d{4}\))?$', alt)
+                    name = m.group(1) if m else alt
                 rating = 0.0
                 viewingdata = item.find('p', class_='poster-viewingdata')
                 if viewingdata:
