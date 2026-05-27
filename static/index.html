@@ -4,238 +4,374 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <title>Letterboxd Recommender</title>
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          oklch(10.5% 0.010 60);
+      --surface:     oklch(15% 0.012 60);
+      --surface-hi:  oklch(21% 0.014 60);
+      --border:      oklch(27% 0.014 60);
+      --text-1:      oklch(92% 0.007 60);
+      --text-2:      oklch(64% 0.010 60);
+      --text-3:      oklch(42% 0.010 60);
+      --accent:      oklch(72% 0.11 143);
+      --accent-hi:   oklch(80% 0.13 143);
+      --gold:        oklch(78% 0.14 80);
+      --danger:      oklch(58% 0.16 25);
+    }
+
+    html { scroll-behavior: smooth; }
+
     body {
-      background-color: #121212;
-      color: #e0e0e0;
+      background: var(--bg);
+      color: var(--text-1);
       font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-size: 1rem;
+      line-height: 1.6;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      min-height: 100vh;
-      margin: 0;
-      padding: 40px 20px;
+      padding: 0 1.25rem 5rem;
     }
-    .input-section {
-      background: #1e1e1e;
-      padding: 3rem;
-      border-radius: 16px;
-      border: 1px solid #333;
+
+    /* ---- Hero ---- */
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       text-align: center;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    }
-    h1 {
-      font-size: 2.2rem;
-      margin-bottom: 0.5rem;
-      color: #00e054;
-      text-shadow: 0 0 15px rgba(0, 224, 84, 0.4);
-    }
-    input {
-      padding: 14px;
-      border-radius: 8px;
-      border: 1px solid #444;
-      background: #222;
-      color: #fff;
-      width: 280px;
-      margin-top: 20px;
-      font-family: inherit;
-      font-size: 1rem;
-    }
-    button {
-      padding: 14px 28px;
-      background: #00e054;
-      color: #000;
-      border: none;
-      border-radius: 8px;
-      font-weight: bold;
-      cursor: pointer;
-      font-family: inherit;
-      margin-top: 15px;
-      font-size: 1rem;
-      transition: all 0.2s;
-    }
-    button:hover { background: #00ff5e; transform: scale(1.05); }
-    button:disabled { background: #555; cursor: wait; transform: none; }
-    
-    .loading-box { display: none; margin-top: 25px; }
-    .timer { font-size: 1.5rem; color: #ffbd00; font-weight: bold; margin-bottom: 10px; font-family: 'Consolas', monospace; }
-    .status { color: #888; font-size: 0.9rem; }
-    .progress-wrap {
+      padding: 6rem 0 2.5rem;
       width: 100%;
-      max-width: 320px;
-      margin: 10px auto 0;
-      text-align: left;
+      max-width: 540px;
     }
+
+    .eyebrow {
+      font-size: 0.68rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 1.5rem;
+    }
+
+    h1 {
+      font-family: 'DM Serif Display', Georgia, serif;
+      font-weight: 400;
+      font-size: 3rem;
+      line-height: 1.1;
+      color: var(--text-1);
+      margin-bottom: 1rem;
+    }
+
+    .tagline {
+      font-size: 0.93rem;
+      color: var(--text-2);
+      max-width: 360px;
+      margin-bottom: 0.4rem;
+    }
+
+    .byline {
+      font-size: 0.75rem;
+      color: var(--text-3);
+      margin-bottom: 2.75rem;
+    }
+
+    .byline a {
+      color: var(--accent);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .byline a:hover { color: var(--accent-hi); }
+
+    /* ---- Country Pill ---- */
+    .country-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4em;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.28rem 0.85rem;
+      font-size: 0.75rem;
+      color: var(--text-3);
+      margin-bottom: 1.5rem;
+    }
+
+    /* ---- Search Row ---- */
+    .search-row {
+      display: flex;
+      width: 100%;
+      max-width: 440px;
+      gap: 0.5rem;
+    }
+
+    #username {
+      flex: 1;
+      padding: 0.72rem 0.9rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--text-1);
+      font-family: inherit;
+      font-size: 0.93rem;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    #username::placeholder { color: var(--text-3); }
+
+    #username:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px oklch(72% 0.11 143 / 0.14);
+    }
+
+    #btn {
+      padding: 0.72rem 1.35rem;
+      background: var(--accent);
+      color: oklch(12% 0.008 60);
+      border: none;
+      border-radius: 7px;
+      font-family: inherit;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    #btn:hover:not(:disabled) { background: var(--accent-hi); }
+    #btn:active:not(:disabled) { transform: scale(0.97); }
+    #btn:disabled {
+      background: var(--surface-hi);
+      color: var(--text-3);
+      cursor: wait;
+    }
+
+    #recommendations-btn {
+      display: none;
+      width: 100%;
+      max-width: 440px;
+      padding: 0.72rem 1.5rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-1);
+      border-radius: 7px;
+      font-family: inherit;
+      font-size: 0.88rem;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 0.75rem;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    #recommendations-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ---- Loading State ---- */
+    .loading-box {
+      display: none;
+      width: 100%;
+      max-width: 440px;
+      margin-top: 2rem;
+    }
+
+    .loading-primary {
+      display: flex;
+      align-items: baseline;
+      gap: 0.85rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .timer {
+      font-family: 'Consolas', 'SF Mono', 'Roboto Mono', monospace;
+      font-size: 1.5rem;
+      color: var(--gold);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em;
+    }
+
+    .status {
+      font-size: 0.8rem;
+      color: var(--text-2);
+    }
+
+    .progress-wrap { width: 100%; }
+
     .progress-label {
-      font-size: 0.78rem;
-      color: #777;
-      margin-bottom: 6px;
+      font-size: 0.69rem;
+      color: var(--text-3);
+      letter-spacing: 0.04em;
+      margin-bottom: 0.4rem;
     }
+
     .progress-track {
       width: 100%;
-      height: 10px;
-      background: #2a2a2a;
-      border: 1px solid #3b3b3b;
+      height: 2px;
+      background: var(--surface-hi);
       border-radius: 999px;
       overflow: hidden;
     }
+
     .progress-fill {
       width: 0%;
       height: 100%;
-      background: linear-gradient(90deg, #00a53f, #00e054);
+      background: var(--accent);
+      border-radius: 999px;
       transition: width 0.25s ease;
     }
+
+    /* ---- Live Log ---- */
     .live-log-box {
+      display: none;
       width: 100%;
-      max-width: 520px;
-      margin: 12px auto 0;
-      background: #151515;
-      border: 1px solid #303030;
-      border-radius: 8px;
-      padding: 10px;
-      text-align: left;
-      max-height: 180px;
+      max-width: 440px;
+      margin-top: 0.85rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.55rem 0.75rem;
+      max-height: 150px;
       overflow-y: auto;
-      display: none;
     }
+
     .live-log-line {
-      color: #9f9f9f;
-      font-size: 0.78rem;
+      font-family: 'Consolas', 'SF Mono', monospace;
+      font-size: 0.69rem;
+      color: var(--text-3);
+      line-height: 1.5;
       white-space: pre-wrap;
-      line-height: 1.35;
-      margin-bottom: 4px;
-      font-family: 'Consolas', monospace;
     }
-    
+
+    .live-log-box::-webkit-scrollbar { width: 3px; }
+    .live-log-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+
+    /* ---- Live Recommendations ---- */
     .recommendations-live {
-      margin-top: 40px;
-      width: 100%;
-      max-width: 900px;
       display: none;
+      width: 100%;
+      max-width: 1080px;
+      margin-top: 4rem;
     }
+
     .recommendations-live h2 {
-      color: #00e054;
-      font-size: 1.5rem;
-      margin-bottom: 20px;
-      text-align: center;
+      font-family: 'DM Serif Display', Georgia, serif;
+      font-weight: 400;
+      font-size: 1.3rem;
+      color: var(--text-1);
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
     }
+
     .recommendations-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+      gap: 14px;
     }
+
+    /* ---- Movie Card ---- */
     .movie-card {
-      background: #1e1e1e;
-      border-radius: 10px;
+      background: var(--surface);
+      border-radius: 8px;
+      border: 1px solid var(--border);
       overflow: hidden;
-      border: 1px solid #333;
       display: flex;
       flex-direction: column;
-      transition: transform 0.2s, border-color 0.2s;
+      transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.2s;
     }
+
     .movie-card:hover {
-      transform: translateY(-5px);
-      border-color: #00e054;
+      transform: translateY(-3px);
+      border-color: oklch(28% 0.055 143);
     }
+
     .movie-poster {
       width: 100%;
       aspect-ratio: 2/3;
       object-fit: cover;
-      background: #0a0a0a;
+      display: block;
+      background: var(--surface-hi);
     }
+
     .movie-info {
-      padding: 15px;
-      flex-grow: 1;
+      padding: 0.65rem 0.7rem 0.7rem;
+      flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 3px;
     }
+
     .title {
-      font-weight: bold;
-      color: #fff;
-      margin-bottom: 5px;
-      font-size: 1rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-1);
+      line-height: 1.3;
     }
+
     .meta {
-      font-size: 0.8rem;
-      color: #aaa;
+      font-size: 0.7rem;
+      color: var(--text-2);
     }
+
     .rating {
-      color: #ffbd00;
-      font-weight: bold;
-      margin: 5px 0;
+      font-size: 0.75rem;
+      color: var(--gold);
+      font-weight: 600;
     }
+
     .reason {
-      font-size: 0.8rem;
+      font-size: 0.68rem;
       font-style: italic;
-      color: #888;
-      background: rgba(255,255,255,0.05);
-      padding: 5px;
-      border-radius: 4px;
-      margin-top: 5px;
+      color: var(--text-3);
+      line-height: 1.4;
+      margin-top: 3px;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
+
     .streaming-sec {
       margin-top: auto;
-      padding-top: 10px;
-      border-top: 1px dashed #333;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
     }
+
     .platform {
       display: inline-block;
-      background: #00e054;
-      color: #000;
-      font-size: 0.7rem;
-      padding: 3px 8px;
-      border-radius: 4px;
-      margin: 2px;
-      font-weight: bold;
+      font-size: 0.62rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: 600;
     }
-    .input-row {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      margin-top: 20px;
+
+    .unavailable-note {
+      font-size: 0.65rem;
+      color: var(--danger);
     }
-    .input-row input { margin-top: 0; }
-    .input-row button { margin-top: 0; }
-    input:focus {
-      outline: none;
-      border-color: #00e054;
-      box-shadow: 0 0 0 3px rgba(0, 224, 84, 0.15);
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    button:active:not(:disabled) { transform: scale(0.96) !important; }
-    .country-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid #2a2a2a;
-      border-radius: 999px;
-      padding: 4px 12px;
-      font-size: 0.82rem;
-      color: #aaa;
-      margin-bottom: 20px;
-    }
+
+    /* ---- Page Transition ---- */
     @keyframes pageFadeOut {
       to { opacity: 0; }
     }
     .page-exiting {
-      animation: pageFadeOut 200ms ease forwards;
+      animation: pageFadeOut 180ms ease forwards;
       pointer-events: none;
     }
+
     @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -243,31 +379,40 @@
         transition-duration: 0.01ms !important;
       }
     }
+
+    @media (max-width: 520px) {
+      .hero { padding-top: 3.5rem; }
+      h1 { font-size: 2.25rem; }
+      .search-row { flex-direction: column; }
+      #btn { width: 100%; }
+      .recommendations-grid { grid-template-columns: repeat(2, 1fr); }
+    }
   </style>
 </head>
 <body>
-  <div class="input-section">
-    <h1>🎬 Letterboxd Recommender</h1>
-    <p style="color: #aaa; margin: 6px 0 20px; font-size: 0.9rem;">Personalized picks from your Letterboxd profile</p>
-    <div style="color: #666; margin-bottom: 15px; font-size: 0.85rem;">
-      Coded by <a href="https://github.com/based-on-what/letterboxd-recommender" target="_blank" rel="noopener noreferrer" style="color: #00e054; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='#00ff5e'" onmouseout="this.style.color='#00e054'">@based-on-what</a>
+  <div class="hero">
+    <p class="eyebrow">Letterboxd Recommender</p>
+    <h1>Find your next<br>great film.</h1>
+    <p class="tagline">Personalized picks generated from your Letterboxd ratings and watchlist.</p>
+    <div class="byline">
+      Built by <a href="https://github.com/based-on-what/letterboxd-recommender" target="_blank" rel="noopener noreferrer">@based-on-what</a>
     </div>
-    <div style="color: #888; margin-bottom: 20px; font-size: 0.9rem;">
-      Enter your username to generate a permanent link.
-    </div>
+
     <div id="country-info" class="country-pill">
-      📍 Searching movie recommendations in: -- 🌍
+      Searching in: --
     </div>
-    
-    <div class="input-row">
-      <input type="text" id="username" placeholder="e.g. davidehrlich" onkeypress="if(event.key==='Enter')startProcess()">
-      <button id="btn" onclick="startProcess()">Generate Recommendations</button>
+
+    <div class="search-row">
+      <input type="text" id="username" placeholder="e.g. davidehrlich" onkeypress="if(event.key==='Enter')startProcess()" autocomplete="off" spellcheck="false">
+      <button id="btn" onclick="startProcess()">Recommend</button>
     </div>
-    <button id="recommendations-btn" style="display: none; width: 280px; margin: 0 auto; margin-top: 30px;" onclick="navigateToRecommendations()"></button>
+    <button id="recommendations-btn" onclick="navigateToRecommendations()"></button>
 
     <div id="loading" class="loading-box">
-      <div class="timer" id="chronometer">00:00.00</div>
-      <div class="status">Analyzing profile & fetching data...</div>
+      <div class="loading-primary">
+        <div class="timer" id="chronometer">00:00.00</div>
+        <div class="status">Analyzing profile &amp; fetching data...</div>
+      </div>
       <div class="progress-wrap">
         <div class="progress-label" id="progress-label">Progress: 0%</div>
         <div class="progress-track">
@@ -278,10 +423,10 @@
     </div>
   </div>
 
-  <div class="recommendations-live" id="recommendations-live">
-    <h2>🎬 Recommendations Found</h2>
+  <section class="recommendations-live" id="recommendations-live">
+    <h2>Recommendations Found</h2>
     <div class="recommendations-grid" id="recommendations-grid"></div>
-  </div>
+  </section>
 
   <script>
     let startTime;
@@ -325,10 +470,10 @@
         const data = await res.json();
         userCountry = data.country_code || 'CL';
         userCountryName = data.country_name || 'Global';
-        
+
         const flagEmoji = countryCodeToFlag(userCountry);
-        document.getElementById('country-info').textContent = 
-          `📍 Searching movie recommendations in: ${userCountryName} ${flagEmoji}`;
+        document.getElementById('country-info').textContent =
+          `Searching in: ${userCountryName} ${flagEmoji}`;
       } catch (e) {}
     };
 
@@ -338,7 +483,7 @@
       const m = Math.floor((diff % 3600000) / 60000);
       const s = Math.floor((diff % 60000) / 1000);
       const ms = Math.floor((diff % 1000) / 10);
-      document.getElementById('chronometer').textContent = 
+      document.getElementById('chronometer').textContent =
         `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
     }
 
@@ -347,9 +492,9 @@
       if (eventSource) {
         eventSource.close();
       }
-      
+
       eventSource = new EventSource(`/api/logs-stream?request_id=${encodeURIComponent(requestId)}`);
-      
+
       eventSource.onmessage = function(event) {
         if (event.data && event.data !== 'heartbeat') {
           console.log('[SERVER]', event.data);
@@ -357,9 +502,8 @@
           updateProgressFromLog(event.data);
         }
       };
-      
+
       eventSource.onerror = function() {
-        // Connection error - try to reconnect
         console.warn('[LOGS] Connection lost, will attempt to reconnect...');
       };
     }
@@ -488,28 +632,28 @@
       if (recsEventSource) {
         recsEventSource.close();
       }
-      
+
       recsEventSource = new EventSource(`/api/recommendations-stream?request_id=${encodeURIComponent(requestId)}`);
-      
+
       recsEventSource.onmessage = function(event) {
         try {
           const data = JSON.parse(event.data);
-          
+
           if (data.status === 'complete') {
             recsEventSource.close();
             recsEventSource = null;
             return;
           }
-          
+
           // Add recommendation to live display
           liveRecommendations.push(data);
           addRecommendationToGrid(data);
-          
+
         } catch (e) {
           console.error('[RECS] Error parsing recommendation:', e);
         }
       };
-      
+
       recsEventSource.onerror = function() {
         console.warn('[RECS] Connection lost');
       };
@@ -532,15 +676,14 @@
         return;
       }
       shownMovieIds.add(movieId);
-      
+
       const grid = document.getElementById('recommendations-grid');
       const liveSection = document.getElementById('recommendations-live');
-      
-      // Show the section if hidden
+
       if (liveSection.style.display === 'none') {
         liveSection.style.display = 'block';
       }
-      
+
       const card = document.createElement('div');
       card.className = 'movie-card';
       const staggerDelay = Math.min((liveRecommendations.length - 1) * 60, 180);
@@ -558,21 +701,21 @@
         streamingHtml = `<div class="streaming-sec">${platforms}</div>`;
       } else {
         const flagEmoji = countryCodeToFlag(userCountry);
-        streamingHtml = `<div class="streaming-sec" style="color: #ff4444; border-color: #ff4444; border-top: 1px dashed #ff4444;">❌ Movie not available on streaming services in ${userCountryName} ${flagEmoji}</div>`;
+        streamingHtml = `<div class="streaming-sec"><span class="unavailable-note">Not on streaming in ${userCountryName} ${flagEmoji}</span></div>`;
       }
 
       card.innerHTML = `
         <img src="${posterUrl}" class="movie-poster" loading="lazy" alt="${movie.title}" onerror="this.src='https://via.placeholder.com/300x450?text=No+Poster'">
         <div class="movie-info">
           <div class="title">${movie.title}</div>
-          <div class="meta">${movie.year || 'N/A'} • ${director}</div>
-          <div class="meta">⏱️ ${runtime}</div>
-          <div class="rating">⭐ ${movie.rating_tmdb || 'N/A'}</div>
-          <div class="reason">💡 ${movie.reason || 'Recommended for you'}</div>
+          <div class="meta">${movie.year || 'N/A'} &middot; ${director}</div>
+          <div class="meta">${runtime}</div>
+          <div class="rating">${movie.rating_tmdb || 'N/A'}</div>
+          <div class="reason">${movie.reason || 'Recommended for you'}</div>
           ${streamingHtml}
         </div>
       `;
-      
+
       grid.appendChild(card);
     }
 
@@ -580,11 +723,11 @@
     function clearLiveRecommendations() {
       const grid = document.getElementById('recommendations-grid');
       const liveSection = document.getElementById('recommendations-live');
-      
+
       grid.innerHTML = '';
       liveSection.style.display = 'none';
       liveRecommendations = [];
-      shownMovieIds.clear(); // Clear displayed IDs
+      shownMovieIds.clear();
     }
 
     // Kick off the recommendation workflow for a provided username.
@@ -592,35 +735,30 @@
       const username = document.getElementById('username').value.trim();
       if (!username) return alert('Please enter a username');
 
-      // Clear previous results
       clearLiveRecommendations();
 
-      // UI changes
       document.getElementById('btn').disabled = true;
       document.getElementById('loading').style.display = 'block';
-      
+
       activeRequestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-      // Connect to logs stream BEFORE starting the request
       connectToLogsStream(activeRequestId);
       connectToStatusStream(activeRequestId);
       resetLiveProgressUi();
       setProgress(5, 'Starting analysis...');
-      
-      // Connect to recommendations stream for real-time updates
+
       connectToRecommendationsStream(activeRequestId);
-      
+
       startTime = new Date();
       timerInterval = setInterval(updateTimer, 50);
 
       try {
-        // Fetch data here
         const response = await fetch('/api/recommend', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({username, country: userCountry, request_id: activeRequestId})
         });
-        
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Unknown error');
         if (data.request_id) {
@@ -630,33 +768,26 @@
         const endTime = new Date();
         const totalTime = endTime - startTime;
 
-        // Save data to localStorage so results page can render instantly without re-fetching
-        // We use a specific key for this user
         const cacheKey = `lb_data_${username}`;
         localStorage.setItem(cacheKey, JSON.stringify({
           data: data,
           timestamp: new Date().getTime(),
-          executionTime: totalTime // Save the timer result
+          executionTime: totalTime
         }));
 
-        // Hide loading and show recommendations button
         clearInterval(timerInterval);
         document.getElementById('loading').style.display = 'none';
         document.getElementById('btn').style.display = 'none';
-        
+
         disconnectFromLogsStream();
         disconnectFromStatusStream();
-        // Let the SSE stream drain naturally (self-closes on 'complete').
-        // Force-close after 3 s as a safety net if 'DONE' never arrives.
         setTimeout(() => disconnectFromRecommendationsStream(), 3000);
         setProgress(100, 'Progress: 100%');
-        
-        // Show and configure the recommendations button
+
         const recBtn = document.getElementById('recommendations-btn');
-        recBtn.textContent = `Get ${username}'s recommendations 🎬`;
+        recBtn.textContent = `View ${username}'s recommendations`;
         recBtn.style.display = 'block';
-        
-        // Store username for navigation
+
         window.currentUsername = username;
 
       } catch (e) {
@@ -674,7 +805,7 @@
     function navigateToRecommendations() {
       if (window.currentUsername) {
         document.body.classList.add('page-exiting');
-        setTimeout(() => { window.location.href = `/${window.currentUsername}`; }, 200);
+        setTimeout(() => { window.location.href = `/${window.currentUsername}`; }, 180);
       }
     }
 

@@ -1,6 +1,8 @@
 # bind y workers se definen via CLI en Procfile (usa $PORT de Railway)
 # Este archivo provee defaults para desarrollo local: `gunicorn --config gunicorn.conf.py`
-workers = 2
+import multiprocessing
+
+workers = multiprocessing.cpu_count() * 2 + 1
 worker_class = "gthread"
 threads = 4
 timeout = 180

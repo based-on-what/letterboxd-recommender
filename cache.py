@@ -36,13 +36,54 @@ except ImportError:
     _redis_lib = None
     logger.warning("Redis unavailable; falling back to in-memory cache")
 
-try:
-    from cachetools import TTLCache
-except ImportError:
-    TTLCache = None
-    logger.warning("cachetools unavailable; using simple dict cache")
-
 REDIS_URL = os.getenv("REDIS_URL")
+
+
+# ---------------------------------------------------------------------------
+# _ExpiringDict — per-key TTL in-memory store (used when Redis is absent)
+# ---------------------------------------------------------------------------
+_EXPIRING_DICT_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "10000"))
+_EXPIRING_DICT_EVICT_INTERVAL = 120.0
+
+
+class _ExpiringDict:
+    """Thread-safe dict with per-key TTL. Used as in-memory fallback for Cache."""
+
+    def __init__(self, max_size: int = _EXPIRING_DICT_MAX_SIZE):
+        self._data: dict = {}
+        self._lock = Lock()
+        self._max_size = max_size
+        self._last_sweep = 0.0
+
+    def _evict_expired(self) -> None:
+        now = time.time()
+        if now - self._last_sweep < _EXPIRING_DICT_EVICT_INTERVAL:
+            return
+        self._last_sweep = now
+        expired = [k for k, (_, exp) in self._data.items() if exp is not None and now >= exp]
+        for k in expired:
+            del self._data[k]
+
+    def get(self, key, default=None):
+        with self._lock:
+            item = self._data.get(key)
+            if item is None:
+                return default
+            value, exp = item
+            if exp is not None and time.time() >= exp:
+                del self._data[key]
+                return default
+            return value
+
+    def set(self, key, value, ttl=None):
+        exp = time.time() + ttl if ttl is not None else None
+        with self._lock:
+            self._evict_expired()
+            if len(self._data) >= self._max_size and key not in self._data:
+                # Evict oldest-expiring entry to stay under cap.
+                oldest = min(self._data, key=lambda k: self._data[k][1] or float('inf'))
+                del self._data[oldest]
+            self._data[key] = (value, exp)
 
 
 # ---------------------------------------------------------------------------
@@ -62,20 +103,25 @@ class RateLimiter:
         self._last = 0.0
 
     def wait(self):
-        """Block until enough time has elapsed since the previous request.
+        """Block until this thread's reserved slot arrives.
 
-        Releases the lock before sleeping so other threads can compute their
-        own slot concurrently instead of serializing behind one sleep call.
+        Pre-allocates a slot by advancing _last under the lock, so concurrent
+        callers each get a distinct departure time instead of all waking at
+        the same instant (thundering herd).
         """
         while True:
             with self._lock:
                 now = time.time()
-                diff = now - self._last
-                if diff >= self.min_interval:
+                next_allowed = self._last + self.min_interval
+                if now >= next_allowed:
                     self._last = now
                     return
-                sleep_time = self.min_interval - diff
+                # Reserve this thread's slot at next_allowed so the next
+                # waiter gets scheduled one interval later.
+                self._last = next_allowed
+                sleep_time = next_allowed - now
             time.sleep(sleep_time)
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -85,26 +131,20 @@ class Cache:
     """
     Cache abstraction with Redis and in-memory fallbacks.
 
-    Provides simple namespaced storage with TTL support. If Redis is
-    unavailable, falls back to local TTL caches or plain dictionaries.
+    Provides simple namespaced storage with per-key TTL support. If Redis is
+    unavailable, falls back to an in-memory _ExpiringDict per namespace.
     """
 
     def __init__(self):
         self.redis = None
         self._redis_attempted = False
         self._init_lock = Lock()
-        self.caches: dict = {}
-
-        if TTLCache is None:
-            self.caches['tmdb']       = {}
-            self.caches['similar']    = {}
-            self.caches['streaming']  = {}
-            self.caches['user_scrape'] = {}
-        else:
-            self.caches['tmdb']       = TTLCache(maxsize=5000, ttl=ONE_MONTH)
-            self.caches['similar']    = TTLCache(maxsize=5000, ttl=ONE_MONTH)
-            self.caches['streaming']  = TTLCache(maxsize=5000, ttl=ONE_DAY)
-            self.caches['user_scrape'] = TTLCache(maxsize=1000, ttl=ONE_WEEK)
+        self.caches: dict = {
+            'tmdb':       _ExpiringDict(),
+            'similar':    _ExpiringDict(),
+            'streaming':  _ExpiringDict(),
+            'user_scrape': _ExpiringDict(),
+        }
 
     def _init_redis(self):
         """Attempt to initialize Redis exactly once."""
@@ -148,7 +188,7 @@ class Cache:
             self._init_redis()
         if self.redis:
             return self._redis_get(f"{namespace}:{key}")
-        bucket = self.caches.get(namespace)
+        bucket: _ExpiringDict | None = self.caches.get(namespace)
         return bucket.get(key) if bucket else None
 
     def set(self, namespace: str, key: str, value, ttl=None):
@@ -158,15 +198,16 @@ class Cache:
             namespace: Cache bucket name.
             key: Item key to write.
             value: Data to persist.
-            ttl: Optional TTL in seconds (Redis only).
+            ttl: Optional TTL in seconds (honored by both Redis and in-memory backends).
         """
         if not self._redis_attempted:
             self._init_redis()
         if self.redis:
             self._redis_set(f"{namespace}:{key}", value, ex=ttl)
         else:
-            if self.caches.get(namespace) is not None:
-                self.caches[namespace][key] = value
+            bucket: _ExpiringDict | None = self.caches.get(namespace)
+            if bucket is not None:
+                bucket.set(key, value, ttl=ttl)
 
 
 # Module-level singleton
