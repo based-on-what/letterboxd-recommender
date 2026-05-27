@@ -22,7 +22,6 @@ from limiter import limiter
 from recommender import (
     ENRICH_WORKERS,
     IS_DEV,
-    TIMEOUT_WARNING_S,
     MovieRecommender,
     _export_debug_json,
     enrich_film_task,
@@ -246,9 +245,6 @@ def recommend():
         preferences = rec_sys.analyze_preferences(enriched)
         logger.info("Preferences — genres: %s | directors: %s | decades: %s",
                     preferences.get('genres'), preferences.get('directors'), preferences.get('decades'))
-
-        if time.time() - start > TIMEOUT_WARNING_S:
-            logger.warning("Approaching timeout; recommendation window may be limited")
 
         # 4. Generate recommendations
         recommendations = rec_sys.get_recommendations(enriched, request_id=request_id, username=username)

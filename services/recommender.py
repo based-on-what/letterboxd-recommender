@@ -20,7 +20,6 @@ logger = logging.getLogger("letterboxd-recommender")
 MIN_RECOMMEND_RATING = float(os.getenv("MIN_RECOMMEND_RATING", "7.0"))
 SIMILAR_WORKERS = 4
 SIMILAR_RESULTS_PER_FILM = 12
-MAX_SEED_FILMS = int(os.getenv("MAX_SEED_FILMS", "60"))
 
 
 def get_recommendations(
@@ -52,9 +51,9 @@ def get_recommendations(
         [f for f in enriched_films if f.get('user_rating', 0) >= 4.0],
         key=lambda x: x.get('user_rating', 0),
         reverse=True,
-    )[:MAX_SEED_FILMS]
+    )
 
-    logger.info("4+ star seed films: %d (cap=%d)", len(highly_rated), MAX_SEED_FILMS)
+    logger.info("4+ star seed films: %d", len(highly_rated))
 
     if IS_DEV and highly_rated:
         _debug_export_seed(highly_rated)

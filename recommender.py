@@ -24,8 +24,6 @@ from utils import normalize_title, IS_DEV, export_debug_json as _export_debug_js
 
 TMDB_KEY = os.getenv("TMDB_KEY")
 
-# Pipeline tuning constants consumed by routes.py
-TIMEOUT_WARNING_S = 240
 ENRICH_WORKERS = 6
 
 # Re-exports: main.py and tests import these via `from recommender import ...`
@@ -40,7 +38,6 @@ __all__ = [
     "LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD",
     "session",
     "sjw",
-    "TIMEOUT_WARNING_S",
     "ENRICH_WORKERS",
 ]
 
