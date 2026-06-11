@@ -10,6 +10,8 @@ import logging
 import os
 import time
 from concurrent.futures import as_completed
+from dataclasses import dataclass
+from typing import Callable, Optional
 
 from cache import cache, ONE_DAY
 from executors import WORK_EXECUTOR
@@ -22,16 +24,28 @@ SIMILAR_WORKERS = 4
 SIMILAR_RESULTS_PER_FILM = 12
 
 
+@dataclass(frozen=True)
+class RecommendationContext:
+    """Per-request pipeline state threaded through seed processing."""
+
+    seen_ids: frozenset
+    seen_titles_norm: frozenset
+    username: Optional[str] = None
+    force_refresh: bool = False
+    on_recommendation: Optional[Callable[[dict], None]] = None
+    on_status: Optional[Callable[[dict], None]] = None
+
+
 def get_recommendations(
     tmdb_client,
     streaming_client,
     enriched_films: list,
-    count=None,
+    count: Optional[int] = None,
     force_refresh: bool = False,
-    username=None,
+    username: Optional[str] = None,
     max_workers: int = 4,
-    on_recommendation=None,
-    on_status=None,
+    on_recommendation: Optional[Callable[[dict], None]] = None,
+    on_status: Optional[Callable[[dict], None]] = None,
 ) -> list:
     """Generate recommendations. Pure domain logic: progress is reported via
     the optional on_recommendation(rec_dict) / on_status(status_dict)
@@ -61,6 +75,15 @@ def get_recommendations(
     if IS_DEV and highly_rated:
         _debug_export_seed(highly_rated)
 
+    ctx = RecommendationContext(
+        seen_ids=frozenset(seen_ids),
+        seen_titles_norm=frozenset(seen_titles_norm),
+        username=username,
+        force_refresh=force_refresh,
+        on_recommendation=on_recommendation,
+        on_status=on_status,
+    )
+
     # Early termination: each seed costs ~12 TMDB + streaming calls. Once we
     # have target unique candidates (count + overshoot buffer for dedup
     # losses), cancel seeds that have not started yet.
@@ -69,18 +92,7 @@ def get_recommendations(
 
     recs = []
     futures = [
-        WORK_EXECUTOR.submit(
-            _get_similar,
-            tmdb_client,
-            streaming_client,
-            film,
-            seen_ids,
-            seen_titles_norm,
-            force_refresh,
-            username,
-            on_recommendation,
-            on_status,
-        )
+        WORK_EXECUTOR.submit(_get_similar, tmdb_client, streaming_client, film, ctx)
         for film in highly_rated
     ]
     for f in as_completed(futures):
@@ -120,21 +132,16 @@ def _get_similar(
     tmdb_client,
     streaming_client,
     film: dict,
-    seen_ids: set,
-    seen_titles_norm: set,
-    force_refresh: bool,
-    username,
-    on_recommendation=None,
-    on_status=None,
+    ctx: RecommendationContext,
 ) -> list:
     if not film.get('tmdb_id'):
         return []
 
-    if on_status:
-        on_status({
+    if ctx.on_status:
+        ctx.on_status({
             'title': film.get('title', 'Untitled'),
             'user_rating': film.get('user_rating', 0),
-            'username': username or 'user',
+            'username': ctx.username or 'user',
         })
 
     cache_key = f"similar:{film['tmdb_id']}"
@@ -146,7 +153,7 @@ def _get_similar(
         raw_results = tmdb_client.get_similar(film['tmdb_id'], limit=SIMILAR_RESULTS_PER_FILM)
         return [m['id'] for m in raw_results if m.get('id') and m.get('title')]
 
-    if force_refresh:
+    if ctx.force_refresh:
         ids = _fetch_similar_ids()
         cache.set('similar', cache_key, ids, ttl=ONE_DAY)
     else:
@@ -155,7 +162,7 @@ def _get_similar(
     local = []
     for mid in ids:
         try:
-            det = tmdb_client.get_details_by_id(mid, force_refresh)
+            det = tmdb_client.get_details_by_id(mid, ctx.force_refresh)
             if not det:
                 continue
             rating = det.get('rating_tmdb')
@@ -166,9 +173,9 @@ def _get_similar(
             det['_title_norm'] = normalize_title(det.get('title', ''))
             det['_orig_norm'] = normalize_title(det.get('original_title', ''))
             if (
-                str(det.get('tmdb_id', '')) in seen_ids
-                or det['_title_norm'] in seen_titles_norm
-                or det['_orig_norm'] in seen_titles_norm
+                str(det.get('tmdb_id', '')) in ctx.seen_ids
+                or det['_title_norm'] in ctx.seen_titles_norm
+                or det['_orig_norm'] in ctx.seen_titles_norm
             ):
                 continue
             streaming = []
@@ -181,9 +188,9 @@ def _get_similar(
                 logger.debug("Streaming fetch error for %s: %s", det.get('title'), exc)
             det['streaming'] = streaming
             local.append(det)
-            if on_recommendation:
+            if ctx.on_recommendation:
                 try:
-                    on_recommendation({
+                    ctx.on_recommendation({
                         k: det.get(k)
                         for k in ('tmdb_id', 'title', 'year', 'rating_tmdb', 'poster',
                                   'director', 'genres', 'runtime', 'streaming', 'reason')
