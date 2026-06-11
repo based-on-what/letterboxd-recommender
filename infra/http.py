@@ -9,7 +9,7 @@ Nothing here knows about business logic or caching.
 import os
 import time
 import logging
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -34,6 +34,10 @@ CAMOUFOX_TIMEOUT = int(os.getenv('CAMOUFOX_TIMEOUT', '20'))
 
 # Connections kept per urllib3 pool (per host).
 HTTP_POOL_MAXSIZE = int(os.getenv('HTTP_POOL_MAXSIZE', '20'))
+
+# Each camoufox call spawns a full headless Firefox; cap concurrent
+# instances so sustained Letterboxd blocking cannot OOM the host.
+CAMOUFOX_MAX_CONCURRENT = int(os.getenv('CAMOUFOX_MAX_CONCURRENT', '1'))
 
 # Sleep between scraping retries; the throttle variant applies to 429s
 # (multiplied by attempt number in both cases).
@@ -232,9 +236,20 @@ def curl_get(url: str, params, headers, timeout: int):
         return None
 
 
+_camoufox_semaphore = BoundedSemaphore(CAMOUFOX_MAX_CONCURRENT)
+
+
 def camoufox_get(url: str, params, timeout: int):
-    """Camoufox fallback — full headless Firefox, last resort."""
+    """Camoufox fallback — full headless Firefox, last resort.
+
+    Short-circuits (returns None, caller serves stale cache) instead of
+    queueing when CAMOUFOX_MAX_CONCURRENT instances are already running.
+    """
     if _Camoufox is None:
+        return None
+    if not _camoufox_semaphore.acquire(blocking=False):
+        logger.warning("camoufox concurrency cap (%d) reached; skipping headless fallback",
+                       CAMOUFOX_MAX_CONCURRENT)
         return None
     try:
         from urllib.parse import urlencode
@@ -252,3 +267,5 @@ def camoufox_get(url: str, params, timeout: int):
     except Exception as exc:
         logger.debug("camoufox error: %s", exc)
         return None
+    finally:
+        _camoufox_semaphore.release()

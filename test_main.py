@@ -449,6 +449,21 @@ def test_sse_connection_tracking_never_negative_under_concurrency():
     sse._cleanup_request_streams(rid)
 
 
+def test_camoufox_concurrency_cap_short_circuits():
+    import infra.http as http
+
+    class DummyCamoufox:
+        def __init__(self, **_kw):
+            raise AssertionError('browser must not launch when cap is saturated')
+
+    with patch.object(http, '_Camoufox', DummyCamoufox):
+        assert http._camoufox_semaphore.acquire(blocking=False)  # saturate cap (default 1)
+        try:
+            assert http.camoufox_get('http://x', None, 1) is None
+        finally:
+            http._camoufox_semaphore.release()
+
+
 def test_expiring_dict_evicts_lru_not_scan():
     from cache import _ExpiringDict
 

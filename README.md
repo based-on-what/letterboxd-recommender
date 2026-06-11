@@ -193,6 +193,7 @@ INTERNAL_TOKEN=
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) for Letterboxd scraping requests (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) for TMDB API requests |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Page-load timeout (s) for the camoufox headless-browser fallback |
+| `CAMOUFOX_MAX_CONCURRENT` | No | `1` | Max concurrent camoufox browser instances; excess requests skip to stale cache |
 | `HTTP_POOL_MAXSIZE` | No | `20` | Connections kept per urllib3 pool (per host) |
 | `LETTERBOXD_RETRY_SLEEP_S` | No | `0.4` | Base sleep (s) between Letterboxd scraping retries |
 | `LETTERBOXD_THROTTLE_SLEEP_S` | No | `1.5` | Base sleep (s) between retries after a 429 |

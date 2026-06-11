@@ -163,6 +163,7 @@ Cuando el circuito está abierto, `get_all_rated_films` sirve el perfil desde la
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) de requests a Letterboxd (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) de requests a TMDB |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Timeout (s) de carga de página del fallback camoufox |
+| `CAMOUFOX_MAX_CONCURRENT` | No | `1` | Instancias camoufox concurrentes máximas (al saturarse: stale cache) |
 | `HTTP_POOL_MAXSIZE` | No | `20` | Conexiones por pool urllib3 (por host) |
 | `LETTERBOXD_RETRY_SLEEP_S` | No | `0.4` | Espera base (s) entre reintentos de scraping |
 | `LETTERBOXD_THROTTLE_SLEEP_S` | No | `1.5` | Espera base (s) entre reintentos tras 429 |
