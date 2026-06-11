@@ -185,6 +185,7 @@ INTERNAL_TOKEN=
 | `LETTERBOXD_CIRCUIT_COOLDOWN_S` | No | `180` | Seconds to skip live scraping while the circuit is open |
 | `CACHE_MAX_SIZE` | No | `10000` | Maximum entries in the in-memory cache before LRU eviction |
 | `STREAM_MAX_AGE_S` | No | `3600` | Seconds before an inactive SSE stream is evicted from memory |
+| `SSE_QUEUE_MAXSIZE` | No | `1000` | Max messages per SSE queue; oldest are dropped on overflow |
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) for Letterboxd scraping requests (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) for TMDB API requests |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Page-load timeout (s) for the camoufox headless-browser fallback |

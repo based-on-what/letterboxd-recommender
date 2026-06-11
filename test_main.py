@@ -159,6 +159,43 @@ def test_recommend_response_marks_stale_cache_usage():
     assert body['data_freshness'] == 'stale_cache'
 
 
+def test_sse_bounded_queue_drops_oldest_without_blocking():
+    from sse import BoundedDropQueue
+
+    q = BoundedDropQueue(maxsize=5)
+    for i in range(10):
+        q.put(i)  # must never block
+
+    assert q.qsize() == 5
+    assert q.dropped == 5
+    assert q.get_nowait() == 5  # oldest five were dropped
+
+
+def test_sse_connection_tracking_never_negative_under_concurrency():
+    import threading
+
+    import sse
+
+    rid = 'test-concurrent-tracking'
+    sse._get_or_create_streams(rid)
+
+    def churn():
+        for _ in range(200):
+            sse._track_stream_connection(rid, 'logs', True)
+            sse._track_stream_connection(rid, 'logs', False)
+
+    threads = [threading.Thread(target=churn) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    streams = sse.REQUEST_STREAMS.get(rid)
+    assert streams is not None  # not done → must not be orphan-collected
+    assert streams['logs_connected'] == 0
+    sse._cleanup_request_streams(rid)
+
+
 def test_limiter_storage_uri_resolution(monkeypatch):
     from limiter import _resolve_storage_uri
 

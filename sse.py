@@ -26,9 +26,36 @@ logger = logging.getLogger("letterboxd-recommender")
 REQUEST_STREAMS: dict = {}
 REQUEST_STREAMS_LOCK = Lock()
 STREAM_MAX_AGE_S = int(os.getenv('STREAM_MAX_AGE_S', '3600'))  # evict orphaned entries after 1h
+SSE_QUEUE_MAXSIZE = int(os.getenv('SSE_QUEUE_MAXSIZE', '1000'))
 
 _STREAM_EVICTION_INTERVAL_S = 30.0  # scan for stale entries at most this often
 _last_stream_eviction_s = 0.0       # guarded by REQUEST_STREAMS_LOCK
+
+
+class BoundedDropQueue(queue.Queue):
+    """Queue that drops the oldest item instead of blocking when full.
+
+    An abandoned SSE client must never block producers nor accumulate
+    messages without bound; `dropped` counts messages lost to overflow.
+    """
+
+    def __init__(self, maxsize: int = SSE_QUEUE_MAXSIZE):
+        super().__init__(maxsize)
+        self.dropped = 0
+        self._drop_lock = Lock()
+
+    def put(self, item, block=True, timeout=None):
+        while True:
+            try:
+                super().put(item, block=False)
+                return
+            except queue.Full:
+                try:
+                    self.get_nowait()
+                    with self._drop_lock:
+                        self.dropped += 1
+                except queue.Empty:
+                    pass
 
 
 def _get_or_create_streams(request_id: str) -> dict:
@@ -57,9 +84,9 @@ def _get_or_create_streams(request_id: str) -> dict:
         streams = REQUEST_STREAMS.get(request_id)
         if streams is None:
             streams = {
-                'logs':                    queue.Queue(),
-                'recommendations':         queue.Queue(),
-                'status':                  queue.Queue(),
+                'logs':                    BoundedDropQueue(),
+                'recommendations':         BoundedDropQueue(),
+                'status':                  BoundedDropQueue(),
                 'logs_connected':          0,
                 'recommendations_connected': 0,
                 'status_connected':        0,
