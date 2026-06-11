@@ -136,14 +136,15 @@ def _get_similar(
     # Cache only the ordered similar-ID list: it is globally valid, small,
     # and immune to enrichment-shape changes. Enriched results are rebuilt
     # on demand from the per-ID tmdb/streaming caches (own TTLs).
-    ids: list | None = None
-    if not force_refresh:
-        ids = cache.get('similar', cache_key)
-
-    if ids is None:
+    def _fetch_similar_ids() -> list:
         raw_results = tmdb_client.get_similar(film['tmdb_id'], limit=SIMILAR_RESULTS_PER_FILM)
-        ids = [m['id'] for m in raw_results if m.get('id') and m.get('title')]
+        return [m['id'] for m in raw_results if m.get('id') and m.get('title')]
+
+    if force_refresh:
+        ids = _fetch_similar_ids()
         cache.set('similar', cache_key, ids, ttl=ONE_DAY)
+    else:
+        ids = cache.get_or_compute('similar', cache_key, _fetch_similar_ids, ttl=ONE_DAY)
 
     local = []
     for mid in ids:

@@ -11,6 +11,7 @@ Provides:
 import os
 import json
 import time
+import uuid
 import logging
 from threading import Lock
 
@@ -174,6 +175,8 @@ class Cache:
         self.redis = None
         self._redis_attempted = False
         self._init_lock = Lock()
+        self._compute_locks: dict = {}
+        self._compute_locks_guard = Lock()
         self.caches: dict = {
             'tmdb':       _ExpiringDict(),
             'similar':    _ExpiringDict(),
@@ -244,6 +247,70 @@ class Cache:
             bucket: _ExpiringDict | None = self.caches.get(namespace)
             if bucket is not None:
                 bucket.set(key, value, ttl=ttl)
+
+    def get_or_compute(self, namespace: str, key: str, fn, ttl=None, lock_timeout: int = 30):
+        """Stampede-safe read-through: on a miss, one caller runs *fn* while
+        concurrent callers briefly wait for the value (Redis: SET NX fetch
+        lock; in-memory: per-key thread lock). fn() results that are None are
+        served but not cached.
+        """
+        val = self.get(namespace, key)
+        if val is not None:
+            return val
+
+        if not self._redis_attempted:
+            self._init_redis()
+
+        if self.redis:
+            lock_key = f"lock:{namespace}:{key}"
+            token = uuid.uuid4().hex
+            try:
+                acquired = self.redis.set(lock_key, token, nx=True, ex=lock_timeout)
+            except Exception:
+                acquired = True  # Redis flaky: compute without coordination
+            if acquired:
+                try:
+                    val = self.get(namespace, key)  # may have landed meanwhile
+                    if val is not None:
+                        return val
+                    val = fn()
+                    if val is not None:
+                        self.set(namespace, key, val, ttl=ttl)
+                    return val
+                finally:
+                    try:
+                        if self.redis.get(lock_key) == token:
+                            self.redis.delete(lock_key)
+                    except Exception:
+                        pass
+
+            # Another caller is computing: wait for the value or the lock.
+            deadline = time.time() + lock_timeout
+            while time.time() < deadline:
+                time.sleep(0.1)
+                val = self.get(namespace, key)
+                if val is not None:
+                    return val
+                try:
+                    if not self.redis.exists(lock_key):
+                        break
+                except Exception:
+                    break
+            val = fn()
+            if val is not None:
+                self.set(namespace, key, val, ttl=ttl)
+            return val
+
+        with self._compute_locks_guard:
+            lock = self._compute_locks.setdefault(f"{namespace}:{key}", Lock())
+        with lock:
+            val = self.get(namespace, key)
+            if val is not None:
+                return val
+            val = fn()
+            if val is not None:
+                self.set(namespace, key, val, ttl=ttl)
+            return val
 
 
 # Module-level singleton

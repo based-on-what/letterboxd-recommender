@@ -393,6 +393,35 @@ def test_sse_connection_tracking_never_negative_under_concurrency():
     sse._cleanup_request_streams(rid)
 
 
+def test_get_or_compute_runs_fn_once_under_concurrency():
+    import threading
+
+    from cache import Cache
+
+    c = Cache()
+    c._redis_attempted = True  # skip Redis: exercise the in-memory path
+    calls = []
+
+    def compute():
+        calls.append(1)
+        time.sleep(0.1)
+        return {'v': 42}
+
+    results = []
+
+    def worker():
+        results.append(c.get_or_compute('tmdb', 'stampede-key', compute, ttl=60))
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(calls) == 1
+    assert results == [{'v': 42}, {'v': 42}]
+
+
 def test_limiter_storage_uri_resolution(monkeypatch):
     from limiter import _resolve_storage_uri
 

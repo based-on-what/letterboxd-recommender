@@ -199,16 +199,13 @@ class LetterboxdClient:
             return [], 0
 
         fresh_key = f"{username}:pages:v2"
-        cached = cache.get('user_scrape', fresh_key)
-        if cached:
-            logger.info("Profile for %s loaded from cache", username)
-            return cached.get('films', []), cached.get('pages', 0)
-
         base_url = f"{_LETTERBOXD_BASE}/{username}/films/"
-        try:
+
+        def _scrape_profile():
+            """Full profile scrape; returns {'pages', 'films'} or None on failure."""
             pages = self.get_page_count(username)
             if pages <= 0:
-                return load_stale()
+                return None
 
             rating_map = {f'rated-{i}': i / 2.0 for i in range(1, 11)}
             headers = dict(LETTERBOXD_HEADERS)
@@ -234,11 +231,24 @@ class LetterboxdClient:
                 films = [f for f in films if f.get('has_rating')]
 
             if not films:
-                return load_stale()
+                return None
 
-            cache.set('user_scrape', fresh_key, {'pages': pages, 'films': films}, ttl=USER_CACHE_TTL)
-            cache.set('user_scrape', stale_key, {'pages': pages, 'films': films}, ttl=USER_STALE_CACHE_TTL)
-            return films, pages
+            result = {'pages': pages, 'films': films}
+            cache.set('user_scrape', stale_key, result, ttl=USER_STALE_CACHE_TTL)
+            return result
+
+        try:
+            cached = cache.get('user_scrape', fresh_key)
+            if cached:
+                logger.info("Profile for %s loaded from cache", username)
+                return cached.get('films', []), cached.get('pages', 0)
+
+            # Stampede-safe: concurrent requests for the same expired profile
+            # trigger a single scrape.
+            result = cache.get_or_compute('user_scrape', fresh_key, _scrape_profile, ttl=USER_CACHE_TTL)
+            if not result:
+                return load_stale()
+            return result.get('films', []), result.get('pages', 0)
 
         except Exception as exc:
             logger.error("Error scraping profile: %s", exc)
