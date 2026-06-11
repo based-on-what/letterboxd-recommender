@@ -159,6 +159,20 @@ def test_recommend_response_marks_stale_cache_usage():
     assert body['data_freshness'] == 'stale_cache'
 
 
+def test_limiter_storage_uri_resolution(monkeypatch):
+    from limiter import _resolve_storage_uri
+
+    monkeypatch.delenv('RATELIMIT_STORAGE_URI', raising=False)
+    monkeypatch.delenv('REDIS_URL', raising=False)
+    assert _resolve_storage_uri() == 'memory://'
+
+    monkeypatch.setenv('REDIS_URL', 'redis://shared:6379')
+    assert _resolve_storage_uri() == 'redis://shared:6379'
+
+    monkeypatch.setenv('RATELIMIT_STORAGE_URI', 'memory://')
+    assert _resolve_storage_uri() == 'memory://'
+
+
 def test_incident_tracker_opens_circuit_after_threshold():
     tracker = main.IncidentTracker()
     threshold = main.LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD

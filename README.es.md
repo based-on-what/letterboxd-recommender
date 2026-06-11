@@ -176,7 +176,7 @@ INTERNAL_TOKEN=
 |----------|-----------|---------|-------------|
 | `TMDB_KEY` | Si | — | API key de TMDB (v3) o Bearer token (v4); se detecta automaticamente |
 | `REDIS_URL` | No | — | Cadena de conexion a Redis; usa cache en memoria si no se define |
-| `RATELIMIT_STORAGE_URI` | No | `memory://` | Backend de almacenamiento para Flask-Limiter |
+| `RATELIMIT_STORAGE_URI` | No | `REDIS_URL` si existe, sino `memory://` | Backend de almacenamiento para Flask-Limiter (memory:// es por proceso: los limites se multiplican por worker) |
 | `PORT` | No | `8080` | Puerto para el servidor Flask/Gunicorn |
 | `FLASK_ENV` | No | `production` | Usar `development` para salida de debug y exports JSON |
 | `LOCAL_DEV` | No | — | Flag alternativo de modo dev (`true` habilita el mismo comportamiento que `FLASK_ENV=development`) |
