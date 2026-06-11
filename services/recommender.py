@@ -133,29 +133,37 @@ def _get_similar(
 
     cache_key = f"similar:{film['tmdb_id']}"
 
-    # Load or build the raw similar-film pool (no user-specific filtering here:
-    # the cache is global so it must not contain user-watched exclusions).
-    raw: list | None = None
+    # Cache only the ordered similar-ID list: it is globally valid, small,
+    # and immune to enrichment-shape changes. Enriched results are rebuilt
+    # on demand from the per-ID tmdb/streaming caches (own TTLs).
+    ids: list | None = None
     if not force_refresh:
-        raw = cache.get('similar', cache_key)
+        ids = cache.get('similar', cache_key)
 
-    if raw is None:
+    if ids is None:
         raw_results = tmdb_client.get_similar(film['tmdb_id'], limit=SIMILAR_RESULTS_PER_FILM)
-        raw = []
-        for m in raw_results:
-            mid = m.get('id')
-            title = m.get('title')
-            if not title or not mid:
-                continue
+        ids = [m['id'] for m in raw_results if m.get('id') and m.get('title')]
+        cache.set('similar', cache_key, ids, ttl=ONE_DAY)
+
+    local = []
+    for mid in ids:
+        try:
             det = tmdb_client.get_details_by_id(mid, force_refresh)
             if not det:
                 continue
             rating = det.get('rating_tmdb')
             if rating is None or float(rating) < MIN_RECOMMEND_RATING:
                 continue
+            det = dict(det)  # cached dict is shared across requests: never mutate it
             det['reason'] = f"Since you liked {film.get('title')}"
             det['_title_norm'] = normalize_title(det.get('title', ''))
             det['_orig_norm'] = normalize_title(det.get('original_title', ''))
+            if (
+                str(det.get('tmdb_id', '')) in seen_ids
+                or det['_title_norm'] in seen_titles_norm
+                or det['_orig_norm'] in seen_titles_norm
+            ):
+                continue
             streaming = []
             try:
                 if det.get('tmdb_id'):
@@ -165,20 +173,6 @@ def _get_similar(
             except Exception as exc:
                 logger.debug("Streaming fetch error for %s: %s", det.get('title'), exc)
             det['streaming'] = streaming
-            raw.append(det)
-        cache.set('similar', cache_key, raw, ttl=ONE_DAY)
-
-    try:
-        local = []
-        for det in raw:
-            det_title_norm = det.get('_title_norm') or normalize_title(det.get('title', ''))
-            det_orig_norm = det.get('_orig_norm') or normalize_title(det.get('original_title', ''))
-            if (
-                str(det.get('tmdb_id', '')) in seen_ids
-                or det_title_norm in seen_titles_norm
-                or det_orig_norm in seen_titles_norm
-            ):
-                continue
             local.append(det)
             if request_id:
                 try:
@@ -189,11 +183,9 @@ def _get_similar(
                     })
                 except Exception:
                     pass
-        return local
-
-    except Exception as exc:
-        logger.error("Error fetching similar for %s: %s", film.get('title'), exc)
-        return []
+        except Exception as exc:
+            logger.error("Error processing similar film %s for %s: %s", mid, film.get('title'), exc)
+    return local
 
 
 def _debug_export_seed(films: list) -> None:

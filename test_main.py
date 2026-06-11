@@ -126,6 +126,50 @@ def test_get_recommendations():
     assert recs and recs[0]['tmdb_id'] == 2
 
 
+def test_similar_cache_stores_only_id_list():
+    r = main.MovieRecommender()
+    r.tmdb_key = 'k'
+    seed = [{'tmdb_id': 1, 'title': 'Seen', 'user_rating': 5.0}]
+    stored = {}
+
+    def fake_set(ns, key, val, ttl=None):
+        stored.setdefault(ns, {})[key] = val
+
+    with patch.object(main.cache, 'get', return_value=None), \
+         patch.object(main.cache, 'set', side_effect=fake_set), \
+         patch.object(r._tmdb, 'get_similar', return_value=[{'id': 2, 'title': 'Rec'}]), \
+         patch.object(r._tmdb, 'get_details_by_id', return_value={
+             'tmdb_id': 2, 'title': 'Rec', 'original_title': 'Rec', 'rating_tmdb': 8.0,
+         }), \
+         patch.object(r._streaming, 'get_by_tmdb_id', return_value=[]), \
+         patch.object(r._streaming, 'get_by_title', return_value=[]):
+        r.get_recommendations(seed)
+
+    # global namespace holds the bare ID list — no enriched payloads, no user data
+    assert stored['similar']['similar:1'] == [2]
+
+
+def test_similar_flow_does_not_mutate_cached_details():
+    r = main.MovieRecommender()
+    r.tmdb_key = 'k'
+    seed = [{'tmdb_id': 1, 'title': 'Seen', 'user_rating': 5.0}]
+    cached_det = {'tmdb_id': 2, 'title': 'Rec', 'original_title': 'Rec', 'rating_tmdb': 8.0}
+
+    def fake_get(ns, key):
+        return [2] if ns == 'similar' else None
+
+    with patch.object(main.cache, 'get', side_effect=fake_get), \
+         patch.object(main.cache, 'set'), \
+         patch.object(r._tmdb, 'get_details_by_id', return_value=cached_det), \
+         patch.object(r._streaming, 'get_by_tmdb_id', return_value=['Netflix']), \
+         patch.object(r._streaming, 'get_by_title', return_value=[]):
+        recs = r.get_recommendations(seed)
+
+    assert recs and recs[0]['streaming'] == ['Netflix']
+    # the dict held by the tmdb cache must stay pristine
+    assert 'reason' not in cached_det and 'streaming' not in cached_det
+
+
 def test_get_recommendations_early_stop_cancels_pending_seeds():
     r = main.MovieRecommender()
     r.tmdb_key = 'k'
