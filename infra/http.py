@@ -15,7 +15,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from cache import RateLimiter
+from cache import RateLimiter, cache as _cache
 
 logger = logging.getLogger("letterboxd-recommender")
 
@@ -73,6 +73,17 @@ except ImportError:
 # IncidentTracker — circuit breaker for Letterboxd scraping
 # ---------------------------------------------------------------------------
 class IncidentTracker:
+    """Circuit breaker for Letterboxd scraping.
+
+    State lives in Redis when available so all workers share one circuit;
+    otherwise falls back to per-process in-memory state.
+    """
+
+    _K_TOTAL = 'cb:letterboxd:total'
+    _K_CONSEC = 'cb:letterboxd:consecutive'
+    _K_LAST = 'cb:letterboxd:last_status'
+    _K_OPEN = 'cb:letterboxd:open'
+
     def __init__(self):
         self._lock = Lock()
         self.letterboxd_total_failures = 0
@@ -80,11 +91,39 @@ class IncidentTracker:
         self.letterboxd_last_status = None
         self.circuit_open_until = 0.0
 
+    @staticmethod
+    def _redis():
+        if not _cache._redis_attempted:
+            _cache._init_redis()
+        return _cache.redis
+
     def is_circuit_open(self) -> bool:
+        r = self._redis()
+        if r is not None:
+            try:
+                return bool(r.exists(self._K_OPEN))
+            except Exception:
+                pass
         with self._lock:
             return time.time() < self.circuit_open_until
 
     def record_letterboxd_result(self, success: bool, status=None) -> None:
+        r = self._redis()
+        if r is not None:
+            try:
+                if success:
+                    r.delete(self._K_CONSEC)
+                    r.set(self._K_LAST, 200)
+                    return
+                r.incr(self._K_TOTAL)
+                consecutive = int(r.incr(self._K_CONSEC))
+                r.set(self._K_LAST, status if status is not None else '')
+                if consecutive >= LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD:
+                    r.set(self._K_OPEN, 1, ex=LETTERBOXD_CIRCUIT_COOLDOWN_S)
+                return
+            except Exception:
+                pass
+
         with self._lock:
             if success:
                 self.letterboxd_consecutive_failures = 0
@@ -97,6 +136,22 @@ class IncidentTracker:
                 self.circuit_open_until = time.time() + LETTERBOXD_CIRCUIT_COOLDOWN_S
 
     def snapshot(self) -> dict:
+        r = self._redis()
+        if r is not None:
+            try:
+                ttl = r.ttl(self._K_OPEN)
+                open_now = ttl is not None and ttl > 0
+                last = r.get(self._K_LAST)
+                return {
+                    'letterboxd_total_failures': int(r.get(self._K_TOTAL) or 0),
+                    'letterboxd_consecutive_failures': int(r.get(self._K_CONSEC) or 0),
+                    'letterboxd_last_status': int(last) if last not in (None, '') else None,
+                    'letterboxd_circuit_open': open_now,
+                    'letterboxd_circuit_retry_after_s': max(0, int(ttl)) if open_now else 0,
+                }
+            except Exception:
+                pass
+
         with self._lock:
             now = time.time()
             open_now = now < self.circuit_open_until
@@ -140,9 +195,9 @@ cloudscraper_session = _cloudscraper_lib.create_scraper() if _cloudscraper_lib e
 # ---------------------------------------------------------------------------
 # Rate limiters — one per external service
 # ---------------------------------------------------------------------------
-tmdb_limiter = RateLimiter(min_interval=0.1)
-letterboxd_limiter = RateLimiter(min_interval=0.15)
-streaming_limiter = RateLimiter(min_interval=0.1)
+tmdb_limiter = RateLimiter(min_interval=0.1, name='tmdb')
+letterboxd_limiter = RateLimiter(min_interval=0.15, name='letterboxd')
+streaming_limiter = RateLimiter(min_interval=0.1, name='streaming')
 
 # ---------------------------------------------------------------------------
 # Low-level request helpers

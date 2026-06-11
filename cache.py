@@ -89,26 +89,61 @@ class _ExpiringDict:
 # ---------------------------------------------------------------------------
 # RateLimiter
 # ---------------------------------------------------------------------------
+# Atomically reserves the next departure slot for a shared limiter key.
+# Keys self-expire so an idle limiter leaves no state behind.
+_RATE_SLOT_LUA = """
+local now = tonumber(ARGV[1])
+local interval = tonumber(ARGV[2])
+local nxt = tonumber(redis.call('GET', KEYS[1]) or '0')
+local slot = now
+if nxt > now then slot = nxt end
+redis.call('SET', KEYS[1], tostring(slot + interval), 'EX', 60)
+return tostring(slot)
+"""
+
+
 class RateLimiter:
     """
     Simple rate controller used to avoid overwhelming external APIs.
 
     Enforces a minimum interval between requests so shared services respect
-    vendor throttling limits even when multiple threads issue calls.
+    vendor throttling limits even when multiple threads issue calls. When a
+    `name` is given and Redis is available, the interval is enforced across
+    all workers (otherwise each process rate-limits independently).
     """
 
-    def __init__(self, min_interval: float = 0.25):
+    def __init__(self, min_interval: float = 0.25, name: str = None):
         self.min_interval = min_interval
+        self._name = name
         self._lock = Lock()
         self._last = 0.0
 
-    def wait(self):
-        """Block until this thread's reserved slot arrives.
+    def _redis(self):
+        if not self._name:
+            return None
+        if not cache._redis_attempted:
+            cache._init_redis()
+        return cache.redis
 
-        Pre-allocates a slot by advancing _last under the lock, so concurrent
-        callers each get a distinct departure time instead of all waking at
-        the same instant (thundering herd).
+    def wait(self):
+        """Block until this caller's reserved slot arrives.
+
+        Pre-allocates a slot (atomically, in Redis when available) so
+        concurrent callers each get a distinct departure time instead of all
+        waking at the same instant (thundering herd).
         """
+        r = self._redis()
+        if r is not None:
+            try:
+                now = time.time()
+                slot = float(r.eval(_RATE_SLOT_LUA, 1, f"rl:{self._name}", now, self.min_interval))
+                delay = slot - now
+                if delay > 0:
+                    time.sleep(delay)
+                return
+            except Exception as exc:
+                logger.debug("Redis rate limiter failed; using in-process fallback: %s", exc)
+
         while True:
             with self._lock:
                 now = time.time()

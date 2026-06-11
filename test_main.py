@@ -1,6 +1,40 @@
+import time
 from unittest.mock import Mock, patch
 
 import main
+
+
+class _FakeRedisKV:
+    """Minimal dict-backed redis stand-in for circuit-breaker tests."""
+
+    def __init__(self):
+        self.store = {}
+        self.expiry = {}
+
+    def incr(self, k):
+        v = int(self.store.get(k, 0)) + 1
+        self.store[k] = v
+        return v
+
+    def set(self, k, v, ex=None):
+        self.store[k] = v
+        if ex is not None:
+            self.expiry[k] = ex
+
+    def get(self, k):
+        v = self.store.get(k)
+        return str(v) if v is not None else None
+
+    def delete(self, k):
+        self.store.pop(k, None)
+
+    def exists(self, k):
+        return 1 if k in self.store else 0
+
+    def ttl(self, k):
+        if k not in self.store:
+            return -2
+        return self.expiry.get(k, -1)
 
 
 def _resp(payload, status=200, text=''):
@@ -311,6 +345,50 @@ def test_incident_tracker_opens_circuit_after_threshold():
     snap = tracker.snapshot()
     assert snap['letterboxd_circuit_open'] is True
     assert snap['letterboxd_consecutive_failures'] >= threshold
+
+
+def test_incident_tracker_redis_backend():
+    tracker = main.IncidentTracker()
+    fake = _FakeRedisKV()
+
+    with patch.object(main.cache, 'redis', fake), \
+         patch.object(main.cache, '_redis_attempted', True):
+        for _ in range(main.LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD):
+            tracker.record_letterboxd_result(success=False, status=403)
+
+        assert tracker.is_circuit_open() is True
+        snap = tracker.snapshot()
+        assert snap['letterboxd_circuit_open'] is True
+        assert snap['letterboxd_consecutive_failures'] >= main.LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD
+        assert snap['letterboxd_last_status'] == 403
+
+        tracker.record_letterboxd_result(success=True)
+        assert tracker.snapshot()['letterboxd_consecutive_failures'] == 0
+
+
+def test_rate_limiter_redis_backend_spaces_calls():
+    from cache import RateLimiter
+
+    class _FakeRedisEval:
+        def __init__(self):
+            self.next_slot = {}
+
+        def eval(self, script, numkeys, key, now, interval):
+            now, interval = float(now), float(interval)
+            slot = max(now, self.next_slot.get(key, 0.0))
+            self.next_slot[key] = slot + interval
+            return str(slot)
+
+    rl = RateLimiter(min_interval=0.05, name='test-shared')
+    with patch.object(main.cache, 'redis', _FakeRedisEval()), \
+         patch.object(main.cache, '_redis_attempted', True):
+        t0 = time.time()
+        for _ in range(3):
+            rl.wait()
+        elapsed = time.time() - t0
+
+    # three calls share slots spaced 0.05s apart: >= ~0.1s total
+    assert elapsed >= 0.08
 
 
 def test_health_includes_incident_snapshot():
