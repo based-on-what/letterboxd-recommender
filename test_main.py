@@ -198,6 +198,34 @@ def test_similar_flow_does_not_mutate_cached_details():
     assert 'reason' not in cached_det and 'streaming' not in cached_det
 
 
+def test_streaming_lookup_deduped_across_seeds():
+    r = main.MovieRecommender()
+    r.tmdb_key = 'k'
+    seeds = [
+        {'tmdb_id': 1, 'title': 'A', 'user_rating': 5.0},
+        {'tmdb_id': 2, 'title': 'B', 'user_rating': 4.5},
+    ]
+    stream_calls = []
+
+    def fake_stream(tid, force_refresh=False):
+        stream_calls.append(tid)
+        return ['Netflix']
+
+    with patch.object(main.cache, 'get', return_value=None), \
+         patch.object(main.cache, 'set'), \
+         patch.object(r._tmdb, 'get_similar', return_value=[{'id': 99, 'title': 'R'}]), \
+         patch.object(r._tmdb, 'get_details_by_id', return_value={
+             'tmdb_id': 99, 'title': 'R', 'original_title': 'R', 'rating_tmdb': 8.0,
+         }), \
+         patch.object(r._streaming, 'get_by_tmdb_id', side_effect=fake_stream), \
+         patch.object(r._streaming, 'get_by_title', return_value=[]):
+        recs = r.get_recommendations(seeds)
+
+    # film 99 reached from both seeds: exactly one streaming lookup
+    assert stream_calls.count(99) == 1
+    assert recs and recs[0]['streaming'] == ['Netflix']
+
+
 def test_get_recommendations_early_stop_cancels_pending_seeds():
     r = main.MovieRecommender()
     r.tmdb_key = 'k'

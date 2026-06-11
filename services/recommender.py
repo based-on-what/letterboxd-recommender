@@ -10,7 +10,8 @@ import logging
 import os
 import time
 from concurrent.futures import as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Lock
 from typing import Callable, Optional
 
 from cache import cache, ONE_DAY
@@ -35,6 +36,10 @@ class RecommendationContext:
     force_refresh: bool = False
     on_recommendation: Optional[Callable[[dict], None]] = None
     on_status: Optional[Callable[[dict], None]] = None
+    # Per-request streaming memo: the same similar film reached via several
+    # seeds is looked up once. Guarded by streaming_lock.
+    streaming_memo: dict = field(default_factory=dict)
+    streaming_lock: Lock = field(default_factory=Lock)
 
 
 def get_recommendations(
@@ -179,14 +184,20 @@ def _get_similar(
                 or det['_orig_norm'] in ctx.seen_titles_norm
             ):
                 continue
-            streaming = []
-            try:
-                if det.get('tmdb_id'):
-                    streaming = streaming_client.get_by_tmdb_id(det['tmdb_id'])
-                if not streaming:
-                    streaming = streaming_client.get_by_title(det.get('title'), det.get('year'))
-            except Exception as exc:
-                logger.debug("Streaming fetch error for %s: %s", det.get('title'), exc)
+            sid = det.get('tmdb_id')
+            with ctx.streaming_lock:
+                if sid in ctx.streaming_memo:
+                    streaming = ctx.streaming_memo[sid]
+                else:
+                    streaming = []
+                    try:
+                        if sid:
+                            streaming = streaming_client.get_by_tmdb_id(sid)
+                        if not streaming:
+                            streaming = streaming_client.get_by_title(det.get('title'), det.get('year'))
+                    except Exception as exc:
+                        logger.debug("Streaming fetch error for %s: %s", det.get('title'), exc)
+                    ctx.streaming_memo[sid] = streaming
             det['streaming'] = streaming
             local.append(det)
             if ctx.on_recommendation:
