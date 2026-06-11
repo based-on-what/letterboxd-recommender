@@ -479,6 +479,35 @@ def test_sse_connection_tracking_never_negative_under_concurrency():
     sse._cleanup_request_streams(rid)
 
 
+def test_validate_scrape_rules():
+    from infra.letterboxd import _validate_scrape
+
+    assert _validate_scrape([{'title': 'A', 'rating': 4.5}], 1) is True
+    assert _validate_scrape([{'title': '', 'rating': 4.5}], 1) is False        # empty title
+    assert _validate_scrape([{'title': 'A', 'rating': 9.0}], 1) is False       # rating out of range
+    assert _validate_scrape([], 1) is False                                    # no films
+    # 10 pages but only 10 films: partially failed scrape
+    assert _validate_scrape([{'title': 'A', 'rating': 4.0}] * 10, 10) is False
+
+
+def test_invalid_scrape_served_but_not_cached():
+    r = main.MovieRecommender()
+    set_namespaces = []
+
+    with patch.object(main.cache, 'get', return_value=None), \
+         patch.object(main.cache, 'set',
+                      side_effect=lambda ns, *a, **k: set_namespaces.append(ns)), \
+         patch.object(r._lb, 'get_page_count', return_value=8), \
+         patch.object(r._lb, '_scrape_page',
+                      return_value=[{'title': 'A', 'rating': 4.0, 'has_rating': True}]):
+        films, pages = r.get_all_rated_films('user')
+
+    # 8 pages x 1 film = partial scrape: served to the caller...
+    assert pages == 8 and len(films) == 8
+    # ...but never persisted to the user_scrape cache
+    assert 'user_scrape' not in set_namespaces
+
+
 def test_camoufox_concurrency_cap_short_circuits():
     import infra.http as http
 

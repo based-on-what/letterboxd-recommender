@@ -34,6 +34,30 @@ from infra.http import (
 logger = logging.getLogger("letterboxd-recommender")
 
 _LETTERBOXD_BASE = "https://letterboxd.com"
+_FILMS_PER_PAGE = 72  # Letterboxd grid size; used for scrape sanity bounds
+
+
+def _validate_scrape(films: list, pages: int) -> bool:
+    """Reject obviously corrupt scrapes so they cannot poison the cache.
+
+    Checks: non-empty string titles, ratings within 0-5, and a film count
+    sane relative to the page count (a multi-page profile yielding under a
+    quarter of the expected minimum indicates a partially failed scrape).
+    """
+    if pages <= 0 or not films:
+        return False
+    for f in films:
+        title = f.get('title')
+        if not isinstance(title, str) or not title.strip():
+            return False
+        rating = f.get('rating', 0)
+        if not isinstance(rating, (int, float)) or not 0 <= rating <= 5:
+            return False
+    if len(films) > (pages + 1) * _FILMS_PER_PAGE:
+        return False
+    if pages > 1 and len(films) < (pages - 1) * _FILMS_PER_PAGE // 4:
+        return False
+    return True
 
 
 class LetterboxdClient:
@@ -202,6 +226,7 @@ class LetterboxdClient:
 
         fresh_key = f"{username}:pages:v2"
         base_url = f"{_LETTERBOXD_BASE}/{username}/films/"
+        invalid_result: dict = {}  # validation-failed scrape: serve once, never cache
 
         def _scrape_profile():
             """Full profile scrape; returns {'pages', 'films'} or None on failure."""
@@ -229,6 +254,10 @@ class LetterboxdClient:
                 if completed % interval == 0 or completed == pages:
                     logger.info("Scrape: %d/%d pages | %d films", completed, pages, len(films))
 
+            # Validate the raw scrape before any filtering so partial or
+            # malformed results are served once but never cached.
+            valid = _validate_scrape(films, pages)
+
             if not include_unrated:
                 films = [f for f in films if f.get('has_rating')]
 
@@ -236,6 +265,12 @@ class LetterboxdClient:
                 return None
 
             result = {'pages': pages, 'films': films}
+            if not valid:
+                logger.warning("Scrape validation failed for %s (%d films / %d pages); serving without caching",
+                               username, len(films), pages)
+                invalid_result['data'] = result
+                return None
+
             cache.set('user_scrape', stale_key, result, ttl=USER_STALE_CACHE_TTL)
             return result
 
@@ -249,6 +284,9 @@ class LetterboxdClient:
             # trigger a single scrape.
             result = cache.get_or_compute('user_scrape', fresh_key, _scrape_profile, ttl=USER_CACHE_TTL)
             if not result:
+                if invalid_result:
+                    bad = invalid_result['data']
+                    return bad.get('films', []), bad.get('pages', 0)
                 return load_stale()
             return result.get('films', []), result.get('pages', 0)
 
