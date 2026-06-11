@@ -302,8 +302,25 @@ Limitado a 5 requests/minuto.
 - `country` (string, opcional): Codigo ISO de pais (default: `"CL"`)
 - `include_streaming` (boolean, opcional): Incluir disponibilidad en streaming (default: `true`)
 - `request_id` (string, opcional): ID del cliente para correlacion con streams SSE (se genera automaticamente si no se envia)
+- `count` (integer, opcional): Cantidad objetivo de recomendaciones; habilita la cancelacion temprana de films semilla pendientes
+- `sync` (boolean, opcional): Corre el pipeline dentro del request y devuelve el payload completo directamente (modo legacy)
 
-**Respuesta:**
+**Respuesta (default, asincrona):** `202 Accepted` — el pipeline corre en segundo plano; el progreso llega por los streams SSE y el payload final via `GET /api/result`.
+
+```json
+{ "request_id": "550e8400-e29b-41d4-a716-446655440000", "username": "karsten", "status": "accepted" }
+```
+
+---
+
+### Obtener Resultado Asincrono
+
+```http
+GET /api/result?request_id=<id>
+```
+
+Limitado a 60 requests/minuto. Devuelve `202` mientras el job esta pendiente, `404` para IDs desconocidos/expirados (los resultados quedan disponibles durante `JOB_RESULT_TTL`, default 15 min), y al completarse el payload final con su status code original:
+
 ```json
 {
   "username": "karsten",

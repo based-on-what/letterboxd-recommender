@@ -302,8 +302,25 @@ Rate-limited to 5 requests/minute.
 - `country` (string, optional): ISO country code (default: `"CL"`)
 - `include_streaming` (boolean, optional): Include streaming availability (default: `true`)
 - `request_id` (string, optional): Client-supplied ID for SSE stream correlation (auto-generated if omitted)
+- `count` (integer, optional): Target number of recommendations; enables early cancellation of pending seed films
+- `sync` (boolean, optional): Run the pipeline inside the request and return the full payload directly (legacy mode)
 
-**Response:**
+**Response (default, async):** `202 Accepted` — the pipeline runs in the background; progress arrives via the SSE streams and the final payload via `GET /api/result`.
+
+```json
+{ "request_id": "550e8400-e29b-41d4-a716-446655440000", "username": "karsten", "status": "accepted" }
+```
+
+---
+
+### Fetch Async Result
+
+```http
+GET /api/result?request_id=<id>
+```
+
+Rate-limited to 60 requests/minute. Returns `202` while the job is pending, `404` for unknown/expired IDs (results stay available for `JOB_RESULT_TTL`, default 15 min), and on completion the final payload with its original status code:
+
 ```json
 {
   "username": "karsten",
