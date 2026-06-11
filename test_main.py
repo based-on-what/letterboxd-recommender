@@ -198,6 +198,36 @@ def test_similar_flow_does_not_mutate_cached_details():
     assert 'reason' not in cached_det and 'streaming' not in cached_det
 
 
+def test_dedup_drops_missing_ids_collisions_and_double_seeds():
+    r = main.MovieRecommender()
+    r.tmdb_key = 'k'
+    seeds = [
+        {'tmdb_id': 1, 'title': 'SeedOne', 'user_rating': 5.0},
+        {'tmdb_id': 2, 'title': 'SeedTwo', 'user_rating': 4.5},
+    ]
+
+    def fake_details(mid, fr=False):
+        return {
+            99: {'tmdb_id': 99, 'title': 'Unique', 'original_title': 'Unique', 'rating_tmdb': 8.0},
+            100: {'tmdb_id': None, 'title': 'NoId', 'original_title': 'NoId', 'rating_tmdb': 8.0},
+            101: {'tmdb_id': 101, 'title': 'SeedOne', 'original_title': 'SeedOne', 'rating_tmdb': 8.0},
+        }[mid]
+
+    similar = [{'id': 99, 'title': 'Unique'}, {'id': 100, 'title': 'NoId'}, {'id': 101, 'title': 'SeedOne'}]
+
+    with patch.object(main.cache, 'get', return_value=None), \
+         patch.object(main.cache, 'set'), \
+         patch.object(r._tmdb, 'get_similar', return_value=similar), \
+         patch.object(r._tmdb, 'get_details_by_id', side_effect=fake_details), \
+         patch.object(r._streaming, 'get_by_tmdb_id', return_value=[]), \
+         patch.object(r._streaming, 'get_by_title', return_value=[]):
+        recs = r.get_recommendations(seeds)
+
+    # same film from both seeds collapses to one; tmdb_id=None dropped;
+    # title collision with a seen film excluded
+    assert [x['tmdb_id'] for x in recs] == [99]
+
+
 def test_streaming_lookup_deduped_across_seeds():
     r = main.MovieRecommender()
     r.tmdb_key = 'k'

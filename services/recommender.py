@@ -122,12 +122,17 @@ def get_recommendations(
 
     unique: dict = {}
     for r in recs:
+        # entries without a tmdb_id are unidentifiable: multiple would
+        # collapse onto the same str(None) key, so drop them outright
+        if not r.get('tmdb_id'):
+            continue
         key = str(r['tmdb_id'])
         if key in unique or key in seen_ids:
             continue
-        t_norm = r.get('_title_norm') or normalize_title(r.get('title', ''))
-        if t_norm not in seen_titles_norm:
-            unique[key] = r
+        # _title_norm/_orig_norm are always set by _get_similar
+        if r['_title_norm'] in seen_titles_norm or r['_orig_norm'] in seen_titles_norm:
+            continue
+        unique[key] = r
 
     result = list(unique.values())
     logger.info("Recommendations: %d candidates → %d unique", len(recs), len(result))
