@@ -126,6 +126,34 @@ def test_get_recommendations():
     assert recs and recs[0]['tmdb_id'] == 2
 
 
+def test_get_recommendations_early_stop_cancels_pending_seeds():
+    r = main.MovieRecommender()
+    r.tmdb_key = 'k'
+    seeds = [{'tmdb_id': i, 'title': f'S{i}', 'user_rating': 4.5} for i in range(1, 41)]
+    similar_calls = []
+
+    def fake_get_similar(mid, limit=12):
+        similar_calls.append(mid)
+        time.sleep(0.02)
+        return [{'id': 1000 + mid, 'title': f'R{mid}'}]
+
+    with patch.object(main.cache, 'get', return_value=None), \
+         patch.object(main.cache, 'set'), \
+         patch.object(r._tmdb, 'get_similar', side_effect=fake_get_similar), \
+         patch.object(r._tmdb, 'get_details_by_id',
+                      side_effect=lambda mid, fr=False: {
+                          'tmdb_id': mid, 'title': f'R{mid}',
+                          'original_title': f'R{mid}', 'rating_tmdb': 8.0,
+                      }), \
+         patch.object(r._streaming, 'get_by_tmdb_id', return_value=[]), \
+         patch.object(r._streaming, 'get_by_title', return_value=[]):
+        recs = r.get_recommendations(seeds, count=3)
+
+    assert len(recs) == 3
+    # without early stop all 40 seeds would be processed
+    assert len(similar_calls) < 40
+
+
 def test_get_streaming_by_tmdb():
     r = main.MovieRecommender(country='CL')
     r.tmdb_key = 'k'

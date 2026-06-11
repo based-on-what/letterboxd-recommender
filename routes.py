@@ -303,8 +303,12 @@ def _build_recommendation_result(username: str, data: dict, request_id: str):
         logger.info("Preferences — genres: %s | directors: %s | decades: %s",
                     preferences.get('genres'), preferences.get('directors'), preferences.get('decades'))
 
-        # 4. Generate recommendations
-        recommendations = rec_sys.get_recommendations(enriched, request_id=request_id, username=username)
+        # 4. Generate recommendations (optional count enables early seed cancellation)
+        count = data.get('count')
+        if not isinstance(count, int) or count <= 0:
+            count = None
+        recommendations = rec_sys.get_recommendations(
+            enriched, count=count, request_id=request_id, username=username)
 
         for r in recommendations:
             r.setdefault('streaming', [])

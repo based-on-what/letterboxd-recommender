@@ -57,6 +57,12 @@ def get_recommendations(
     if IS_DEV and highly_rated:
         _debug_export_seed(highly_rated)
 
+    # Early termination: each seed costs ~12 TMDB + streaming calls. Once we
+    # have target unique candidates (count + overshoot buffer for dedup
+    # losses), cancel seeds that have not started yet.
+    target = None if count is None else count + max(5, count // 2)
+    unique_keys: set = set()
+
     recs = []
     futures = [
         WORK_EXECUTOR.submit(
@@ -74,9 +80,22 @@ def get_recommendations(
     ]
     for f in as_completed(futures):
         try:
-            recs.extend(f.result())
+            batch = f.result()
         except Exception:
             logger.exception("Similar-film task failed")
+            continue
+        recs.extend(batch)
+        if target is None:
+            continue
+        for r in batch:
+            key = str(r.get('tmdb_id'))
+            if key not in seen_ids:
+                unique_keys.add(key)
+        if len(unique_keys) >= target:
+            cancelled = sum(1 for pending in futures if pending.cancel())
+            logger.info("Early stop: %d unique candidates >= target %d; cancelled %d pending seeds",
+                        len(unique_keys), target, cancelled)
+            break
 
     unique: dict = {}
     for r in recs:
