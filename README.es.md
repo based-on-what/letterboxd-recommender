@@ -193,6 +193,10 @@ INTERNAL_TOKEN=
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) para requests de scraping a Letterboxd (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) para requests a la API de TMDB |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Timeout (s) de carga de pagina para el fallback camoufox (navegador headless) |
+| `HTTP_POOL_MAXSIZE` | No | `20` | Conexiones mantenidas por pool urllib3 (por host) |
+| `LETTERBOXD_RETRY_SLEEP_S` | No | `0.4` | Espera base (s) entre reintentos de scraping |
+| `LETTERBOXD_THROTTLE_SLEEP_S` | No | `1.5` | Espera base (s) entre reintentos tras un 429 |
+| `SIMILAR_RESULTS_PER_FILM` | No | `12` | Titulos similares pedidos a TMDB por film semilla |
 | `INTERNAL_TOKEN` | No | — | Token para proteger `/_incident-status` (sin proteccion si no se define) |
 
 ---

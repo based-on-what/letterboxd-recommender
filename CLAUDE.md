@@ -163,6 +163,10 @@ Cuando el circuito está abierto, `get_all_rated_films` sirve el perfil desde la
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) de requests a Letterboxd (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) de requests a TMDB |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Timeout (s) de carga de página del fallback camoufox |
+| `HTTP_POOL_MAXSIZE` | No | `20` | Conexiones por pool urllib3 (por host) |
+| `LETTERBOXD_RETRY_SLEEP_S` | No | `0.4` | Espera base (s) entre reintentos de scraping |
+| `LETTERBOXD_THROTTLE_SLEEP_S` | No | `1.5` | Espera base (s) entre reintentos tras 429 |
+| `SIMILAR_RESULTS_PER_FILM` | No | `12` | Títulos similares pedidos a TMDB por film semilla |
 | `INTERNAL_TOKEN` | No | — | Bearer para proteger `/_incident-status` |
 
 ---
@@ -287,7 +291,7 @@ web: gunicorn main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class gthread -
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **letterboxd-recommender** (654 symbols, 1078 relationships, 52 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **letterboxd-recommender** (758 symbols, 1520 relationships, 66 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

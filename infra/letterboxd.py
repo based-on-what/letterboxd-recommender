@@ -20,6 +20,8 @@ from infra.http import (
     INCIDENT_TRACKER,
     LETTERBOXD_HEADERS,
     LETTERBOXD_HTTP_TIMEOUT,
+    LETTERBOXD_RETRY_SLEEP_S,
+    LETTERBOXD_THROTTLE_SLEEP_S,
     letterboxd_limiter,
     tmdb_limiter,
     cloudscraper_session,
@@ -105,14 +107,14 @@ class LetterboxdClient:
                         return fallback
 
                 if r.status_code == 429:
-                    time.sleep((attempt + 1) * 1.5)
+                    time.sleep((attempt + 1) * LETTERBOXD_THROTTLE_SLEEP_S)
                 else:
-                    time.sleep(0.4)
+                    time.sleep(LETTERBOXD_RETRY_SLEEP_S)
 
             except requests.RequestException as exc:
                 _failures.append(f"attempt={attempt + 1},error={type(exc).__name__},source=requests")
                 logger.warning("Request error for %s (attempt %d): %s", url, attempt + 1, exc)
-                time.sleep(0.4 * (attempt + 1))
+                time.sleep(LETTERBOXD_RETRY_SLEEP_S * (attempt + 1))
 
         if service == 'letterboxd':
             camoufox_resp = camoufox_get(url, params, CAMOUFOX_TIMEOUT)

@@ -32,6 +32,14 @@ LETTERBOXD_HTTP_TIMEOUT = int(os.getenv('LETTERBOXD_HTTP_TIMEOUT', '12'))
 TMDB_HTTP_TIMEOUT = int(os.getenv('TMDB_HTTP_TIMEOUT', '12'))
 CAMOUFOX_TIMEOUT = int(os.getenv('CAMOUFOX_TIMEOUT', '20'))
 
+# Connections kept per urllib3 pool (per host).
+HTTP_POOL_MAXSIZE = int(os.getenv('HTTP_POOL_MAXSIZE', '20'))
+
+# Sleep between scraping retries; the throttle variant applies to 429s
+# (multiplied by attempt number in both cases).
+LETTERBOXD_RETRY_SLEEP_S = float(os.getenv('LETTERBOXD_RETRY_SLEEP_S', '0.4'))
+LETTERBOXD_THROTTLE_SLEEP_S = float(os.getenv('LETTERBOXD_THROTTLE_SLEEP_S', '1.5'))
+
 DEFAULT_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
@@ -181,7 +189,7 @@ def make_session(trust_env: bool = False) -> requests.Session:
         # (b) masks the failure from IncidentTracker (status becomes None).
         status_forcelist=(500, 502, 504),
     )
-    adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
+    adapter = HTTPAdapter(max_retries=retries, pool_connections=HTTP_POOL_MAXSIZE, pool_maxsize=HTTP_POOL_MAXSIZE)
     s.mount("https://", adapter)
     s.mount("http://", adapter)
     s.headers.update({"User-Agent": DEFAULT_USER_AGENT})

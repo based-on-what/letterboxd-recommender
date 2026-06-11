@@ -21,7 +21,8 @@ logger = logging.getLogger("letterboxd-recommender")
 
 MIN_RECOMMEND_RATING = float(os.getenv("MIN_RECOMMEND_RATING", "7.0"))
 SIMILAR_WORKERS = 4
-SIMILAR_RESULTS_PER_FILM = 12
+# Similar titles fetched from TMDB per seed film.
+SIMILAR_RESULTS_PER_FILM = int(os.getenv("SIMILAR_RESULTS_PER_FILM", "12"))
 
 
 @dataclass(frozen=True)
