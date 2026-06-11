@@ -8,7 +8,7 @@ No scraping, no streaming logic, no recommendation logic.
 import logging
 
 from cache import cache, ONE_DAY
-from infra.http import session, tmdb_limiter
+from infra.http import TMDB_HTTP_TIMEOUT, session, tmdb_limiter
 
 logger = logging.getLogger("letterboxd-recommender")
 
@@ -51,7 +51,7 @@ class TmdbClient:
                 f"{_TMDB_BASE}{path}",
                 params=merged_params,
                 headers=merged_headers,
-                timeout=12,
+                timeout=TMDB_HTTP_TIMEOUT,
             )
             if r.status_code == 200:
                 return r

@@ -25,6 +25,13 @@ logger = logging.getLogger("letterboxd-recommender")
 LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv('LETTERBOXD_CIRCUIT_FAILURE_THRESHOLD', '5'))
 LETTERBOXD_CIRCUIT_COOLDOWN_S = int(os.getenv('LETTERBOXD_CIRCUIT_COOLDOWN_S', '180'))
 
+# Outbound HTTP timeouts (seconds). Every outbound call in infra/ must use one
+# of these. JustWatch (simplejustwatchapi) exposes no timeout parameter; it is
+# bounded by httpx's 5s default instead.
+LETTERBOXD_HTTP_TIMEOUT = int(os.getenv('LETTERBOXD_HTTP_TIMEOUT', '12'))
+TMDB_HTTP_TIMEOUT = int(os.getenv('TMDB_HTTP_TIMEOUT', '12'))
+CAMOUFOX_TIMEOUT = int(os.getenv('CAMOUFOX_TIMEOUT', '20'))
+
 DEFAULT_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'

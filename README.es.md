@@ -161,6 +161,11 @@ LETTERBOXD_CIRCUIT_COOLDOWN_S=180
 CACHE_MAX_SIZE=10000
 STREAM_MAX_AGE_S=3600
 
+# Opcional - Timeouts HTTP salientes (segundos)
+LETTERBOXD_HTTP_TIMEOUT=12
+TMDB_HTTP_TIMEOUT=12
+CAMOUFOX_TIMEOUT=20
+
 # Opcional - Auth interna para /_incident-status
 INTERNAL_TOKEN=
 ```
@@ -180,6 +185,9 @@ INTERNAL_TOKEN=
 | `LETTERBOXD_CIRCUIT_COOLDOWN_S` | No | `180` | Segundos de espera mientras el circuit breaker esta abierto |
 | `CACHE_MAX_SIZE` | No | `10000` | Maximo de entradas en la cache en memoria antes de eviccion LRU |
 | `STREAM_MAX_AGE_S` | No | `3600` | Segundos antes de evictar un stream SSE inactivo de la memoria |
+| `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) para requests de scraping a Letterboxd (requests/cloudscraper/curl_cffi) |
+| `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) para requests a la API de TMDB |
+| `CAMOUFOX_TIMEOUT` | No | `20` | Timeout (s) de carga de pagina para el fallback camoufox (navegador headless) |
 | `INTERNAL_TOKEN` | No | — | Token para proteger `/_incident-status` (sin proteccion si no se define) |
 
 ---

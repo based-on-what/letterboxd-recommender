@@ -15,8 +15,10 @@ from bs4 import BeautifulSoup
 
 from cache import cache, USER_CACHE_TTL, USER_STALE_CACHE_TTL
 from infra.http import (
+    CAMOUFOX_TIMEOUT,
     INCIDENT_TRACKER,
     LETTERBOXD_HEADERS,
+    LETTERBOXD_HTTP_TIMEOUT,
     letterboxd_limiter,
     tmdb_limiter,
     cloudscraper_session,
@@ -47,7 +49,7 @@ class LetterboxdClient:
 
         if cloudscraper_session is not None:
             try:
-                alt = cloudscraper_session.get(url, params=params, headers=headers, timeout=12)
+                alt = cloudscraper_session.get(url, params=params, headers=headers, timeout=LETTERBOXD_HTTP_TIMEOUT)
                 if alt.status_code == 200:
                     logger.info("Letterboxd succeeded via cloudscraper fallback")
                     return alt
@@ -55,7 +57,7 @@ class LetterboxdClient:
             except requests.RequestException as exc:
                 failures.append(f"attempt={attempt + 1},error={type(exc).__name__},source=cloudscraper")
 
-        curl_resp = curl_get(url, params, headers, 12)
+        curl_resp = curl_get(url, params, headers, LETTERBOXD_HTTP_TIMEOUT)
         if curl_resp is not None:
             if getattr(curl_resp, 'status_code', None) == 200:
                 logger.info("Letterboxd succeeded via curl_cffi fallback")
@@ -86,7 +88,7 @@ class LetterboxdClient:
         for attempt in range(max_retries + 1):
             try:
 
-                r = request_with_fallback(url, params, merged_headers, 12, use_proxy=(service == 'letterboxd'))
+                r = request_with_fallback(url, params, merged_headers, LETTERBOXD_HTTP_TIMEOUT, use_proxy=(service == 'letterboxd'))
                 last_status = r.status_code
 
                 if r.status_code == 200:
@@ -112,7 +114,7 @@ class LetterboxdClient:
                 time.sleep(0.4 * (attempt + 1))
 
         if service == 'letterboxd':
-            camoufox_resp = camoufox_get(url, params, 20)
+            camoufox_resp = camoufox_get(url, params, CAMOUFOX_TIMEOUT)
             if camoufox_resp is not None:
                 logger.info("Letterboxd succeeded via camoufox (last resort)")
                 INCIDENT_TRACKER.record_letterboxd_result(success=True, status=200)

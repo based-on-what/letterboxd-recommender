@@ -47,6 +47,8 @@ class StreamingClient:
             if sjw is None:
                 return []
             streaming_limiter.wait()
+            # sjw exposes no timeout parameter; the call is bounded by httpx's
+            # 5s default (connect/read/write/pool).
             entries = sjw.search(title, country=self._country, language='en', count=1, best_only=True)
             if not entries:
                 cache.set('streaming', cache_key, [], ttl=SIX_HOURS)
