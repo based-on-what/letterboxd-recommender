@@ -421,6 +421,33 @@ def test_sse_connection_tracking_never_negative_under_concurrency():
     sse._cleanup_request_streams(rid)
 
 
+def test_expiring_dict_evicts_lru_not_scan():
+    from cache import _ExpiringDict
+
+    d = _ExpiringDict(max_size=3)
+    d.set('a', 1)
+    d.set('b', 2)
+    d.set('c', 3)
+    assert d.get('a') == 1  # 'a' becomes most recently used
+
+    d.set('d', 4)  # cap reached: least-recently-used ('b') is evicted in O(1)
+
+    assert d.get('b') is None
+    assert d.get('a') == 1
+    assert d.get('c') == 3
+    assert d.get('d') == 4
+
+
+def test_expiring_dict_honors_ttl_on_read():
+    from cache import _ExpiringDict
+
+    d = _ExpiringDict(max_size=3)
+    d.set('k', 'v', ttl=0.05)
+    assert d.get('k') == 'v'
+    time.sleep(0.06)
+    assert d.get('k') is None
+
+
 def test_get_or_compute_runs_fn_once_under_concurrency():
     import threading
 

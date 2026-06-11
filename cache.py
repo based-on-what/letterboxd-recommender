@@ -13,6 +13,7 @@ import json
 import time
 import uuid
 import logging
+from collections import OrderedDict
 from threading import Lock
 
 logger = logging.getLogger("letterboxd-recommender")
@@ -48,10 +49,15 @@ _EXPIRING_DICT_EVICT_INTERVAL = 120.0
 
 
 class _ExpiringDict:
-    """Thread-safe dict with per-key TTL. Used as in-memory fallback for Cache."""
+    """Thread-safe LRU dict with per-key TTL. In-memory fallback for Cache.
+
+    Backed by an OrderedDict in access order: reads move_to_end (O(1)) and
+    the size-cap eviction pops the least-recently-used entry (O(1)) instead
+    of scanning the whole dict.
+    """
 
     def __init__(self, max_size: int = _EXPIRING_DICT_MAX_SIZE):
-        self._data: dict = {}
+        self._data: OrderedDict = OrderedDict()
         self._lock = Lock()
         self._max_size = max_size
         self._last_sweep = 0.0
@@ -74,16 +80,17 @@ class _ExpiringDict:
             if exp is not None and time.time() >= exp:
                 del self._data[key]
                 return default
+            self._data.move_to_end(key)
             return value
 
     def set(self, key, value, ttl=None):
         exp = time.time() + ttl if ttl is not None else None
         with self._lock:
             self._evict_expired()
-            if len(self._data) >= self._max_size and key not in self._data:
-                # Evict oldest-expiring entry to stay under cap.
-                oldest = min(self._data, key=lambda k: self._data[k][1] or float('inf'))
-                del self._data[oldest]
+            if key in self._data:
+                self._data.move_to_end(key)
+            elif len(self._data) >= self._max_size:
+                self._data.popitem(last=False)  # O(1) LRU eviction
             self._data[key] = (value, exp)
 
 
