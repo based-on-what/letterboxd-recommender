@@ -105,15 +105,24 @@ class MovieRecommender:
         request_id=None,
         username=None,
     ) -> list:
+        # SSE adapter: the service is transport-agnostic; when a request_id
+        # is given, progress callbacks publish to the SSE streams here.
+        on_recommendation = on_status = None
+        if request_id:
+            from sse import publish
+            on_recommendation = lambda rec: publish(request_id, 'recommendations', rec)  # noqa: E731
+            on_status = lambda st: publish(request_id, 'status', st)  # noqa: E731
+
         return _get_recommendations(
             self._tmdb,
             self._streaming,
             enriched_films,
             count=count,
             force_refresh=force_refresh,
-            request_id=request_id,
             username=username,
             max_workers=self.max_workers,
+            on_recommendation=on_recommendation,
+            on_status=on_status,
         )
 
     # ---- Utility ----------------------------------------------------------

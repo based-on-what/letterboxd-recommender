@@ -14,7 +14,6 @@ from concurrent.futures import as_completed
 from cache import cache, ONE_DAY
 from executors import WORK_EXECUTOR
 from utils import normalize_title, IS_DEV, export_debug_json
-from sse import publish
 
 logger = logging.getLogger("letterboxd-recommender")
 
@@ -29,10 +28,15 @@ def get_recommendations(
     enriched_films: list,
     count=None,
     force_refresh: bool = False,
-    request_id=None,
     username=None,
     max_workers: int = 4,
+    on_recommendation=None,
+    on_status=None,
 ) -> list:
+    """Generate recommendations. Pure domain logic: progress is reported via
+    the optional on_recommendation(rec_dict) / on_status(status_dict)
+    callbacks, so this is callable with no Flask or SSE context.
+    """
     seen_ids: set = set()
     seen_titles_norm: set = set()
     for film in enriched_films:
@@ -72,9 +76,10 @@ def get_recommendations(
             film,
             seen_ids,
             seen_titles_norm,
-            request_id,
             force_refresh,
             username,
+            on_recommendation,
+            on_status,
         )
         for film in highly_rated
     ]
@@ -117,15 +122,16 @@ def _get_similar(
     film: dict,
     seen_ids: set,
     seen_titles_norm: set,
-    request_id,
     force_refresh: bool,
     username,
+    on_recommendation=None,
+    on_status=None,
 ) -> list:
     if not film.get('tmdb_id'):
         return []
 
-    if request_id:
-        publish(request_id, 'status', {
+    if on_status:
+        on_status({
             'title': film.get('title', 'Untitled'),
             'user_rating': film.get('user_rating', 0),
             'username': username or 'user',
@@ -175,9 +181,9 @@ def _get_similar(
                 logger.debug("Streaming fetch error for %s: %s", det.get('title'), exc)
             det['streaming'] = streaming
             local.append(det)
-            if request_id:
+            if on_recommendation:
                 try:
-                    publish(request_id, 'recommendations', {
+                    on_recommendation({
                         k: det.get(k)
                         for k in ('tmdb_id', 'title', 'year', 'rating_tmdb', 'poster',
                                   'director', 'genres', 'runtime', 'streaming', 'reason')

@@ -126,6 +126,34 @@ def test_get_recommendations():
     assert recs and recs[0]['tmdb_id'] == 2
 
 
+def test_service_recommendations_callable_without_flask_or_sse():
+    from services.recommender import get_recommendations as svc_get
+
+    tmdb = Mock()
+    tmdb.get_similar.return_value = [{'id': 2, 'title': 'Rec'}]
+    tmdb.get_details_by_id.return_value = {
+        'tmdb_id': 2, 'title': 'Rec', 'original_title': 'Rec', 'rating_tmdb': 8.0,
+    }
+    streaming = Mock()
+    streaming.get_by_tmdb_id.return_value = []
+    streaming.get_by_title.return_value = []
+
+    seen_recs, seen_status = [], []
+    with patch.object(main.cache, 'get', return_value=None), \
+         patch.object(main.cache, 'set'):
+        recs = svc_get(
+            tmdb, streaming,
+            [{'tmdb_id': 1, 'title': 'Seen', 'user_rating': 5.0}],
+            username='u',
+            on_recommendation=seen_recs.append,
+            on_status=seen_status.append,
+        )
+
+    assert recs and recs[0]['tmdb_id'] == 2
+    assert seen_recs and seen_recs[0]['title'] == 'Rec'
+    assert seen_status and seen_status[0]['username'] == 'u'
+
+
 def test_similar_cache_stores_only_id_list():
     r = main.MovieRecommender()
     r.tmdb_key = 'k'
