@@ -378,7 +378,7 @@ letterboxd-recommender/
 ├── sse.py                   # SSE stream management (logs, recommendations, status queues)
 ├── limiter.py               # Flask-Limiter singleton (deferred init_app)
 ├── utils.py                 # Shared utilities: normalize_title, IS_DEV, export_debug_json
-├── test_main.py             # Unit and integration tests (pytest)
+├── tests/                   # Unit and integration tests (pytest): routes, cache, sse, infra, services
 │
 ├── infra/                   # I/O layer — no business logic
 │   ├── http.py              # Sessions, retry config, circuit breaker (IncidentTracker), per-service rate limiters, anti-bot fallbacks
@@ -429,7 +429,7 @@ Contributions are welcome.
 1. Fork the repository and create a feature branch: `git checkout -b feature/my-feature`
 2. Follow PEP 8 style guidelines
 3. Keep business logic in `services/` and I/O in `infra/`; routes should only parse input and format responses
-4. Run `pytest test_main.py` before submitting
+4. Run `pytest tests` before submitting
 5. Commit using conventional prefixes: `Add:`, `Fix:`, `Update:`, `Docs:`
 6. Open a pull request with a clear description referencing any related issues
 

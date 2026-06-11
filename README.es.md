@@ -378,7 +378,7 @@ letterboxd-recommender/
 ├── sse.py                   # Gestion de streams SSE (colas de logs, recomendaciones y estado)
 ├── limiter.py               # Singleton de Flask-Limiter (init_app diferido)
 ├── utils.py                 # Utilidades compartidas: normalize_title, IS_DEV, export_debug_json
-├── test_main.py             # Tests unitarios e integracion (pytest)
+├── tests/                   # Tests unitarios e integracion (pytest): routes, cache, sse, infra, services
 │
 ├── infra/                   # Capa de I/O: sin logica de negocio
 │   ├── http.py              # Sesiones, circuit breaker (IncidentTracker), rate limiters, fallbacks anti-bot
@@ -429,7 +429,7 @@ Las contribuciones son bienvenidas.
 1. Haz fork del repositorio y crea una rama de feature: `git checkout -b feature/mi-feature`
 2. Sigue las guias de estilo PEP 8
 3. Mantene la logica de negocio en `services/` y el I/O en `infra/`; las rutas solo deben parsear input y formatear respuestas
-4. Ejecuta `pytest test_main.py` antes de enviar
+4. Ejecuta `pytest tests` antes de enviar
 5. Usa prefijos convencionales en los commits: `Add:`, `Fix:`, `Update:`, `Docs:`
 6. Abre un pull request con una descripcion clara que referencie los issues relacionados
 

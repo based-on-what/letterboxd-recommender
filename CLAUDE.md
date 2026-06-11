@@ -36,7 +36,7 @@ letterboxd-recommender/
 ├── sse.py               # Gestión de streams SSE (colas de logs/recs/status por request_id)
 ├── limiter.py           # Flask-Limiter singleton (patrón deferred init_app)
 ├── utils.py             # normalize_title, IS_DEV, export_debug_json
-├── test_main.py         # Tests pytest (unit + integración)
+├── tests/               # Tests pytest: test_routes, test_cache, test_sse, test_infra, test_services
 │
 ├── infra/               # Capa I/O — sin lógica de negocio
 │   ├── http.py          # Sessions, retry, circuit breaker (IncidentTracker), rate limiters, fallbacks anti-bot
@@ -195,7 +195,7 @@ Navegar a `http://localhost:8080`.
 ## Tests
 
 ```bash
-pytest test_main.py -v
+pytest tests -v
 ```
 
 Los tests importan todo desde `main` (que re-exporta los símbolos necesarios). Patrón de patching:
@@ -287,12 +287,12 @@ web: gunicorn main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class gthread -
 | Nuevo endpoint HTTP | `routes.py` (solo parsing + respuesta) |
 | Nuevo país soportado | `MovieRecommender._COUNTRY_NAMES` en `recommender.py` |
 | Nueva variable de entorno | `.env.example` + tabla en `README.md` + aquí |
-| Nuevo test | `test_main.py` — importar desde `main`, parchear con `patch.object` |
+| Nuevo test | `tests/test_<área>.py` — importar desde `main`, parchear con `patch.object` |
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **letterboxd-recommender** (758 symbols, 1520 relationships, 66 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **letterboxd-recommender** (845 symbols, 1634 relationships, 74 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
