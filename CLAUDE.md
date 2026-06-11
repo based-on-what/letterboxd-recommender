@@ -156,6 +156,8 @@ Cuando el circuito está abierto, `get_all_rated_films` sirve el perfil desde la
 | `CACHE_MAX_SIZE` | No | `10000` | Máximo de entradas en `_ExpiringDict` antes de evicción LRU |
 | `STREAM_MAX_AGE_S` | No | `3600` | Tiempo hasta evictar streams SSE huérfanos |
 | `SSE_QUEUE_MAXSIZE` | No | `1000` | Máximo de mensajes por cola SSE (drop-oldest al desbordar) |
+| `SCRAPE_POOL_SIZE` | No | `6` | Threads del pool compartido de scraping (`executors.py`, por proceso) |
+| `WORK_POOL_SIZE` | No | `8` | Threads del pool compartido de enriquecimiento/recomendación (`executors.py`, por proceso) |
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) de requests a Letterboxd (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) de requests a TMDB |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Timeout (s) de carga de página del fallback camoufox |
@@ -282,7 +284,7 @@ web: gunicorn main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class gthread -
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **letterboxd-recommender** (649 symbols, 1073 relationships, 52 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **letterboxd-recommender** (654 symbols, 1078 relationships, 52 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

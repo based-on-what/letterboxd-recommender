@@ -9,9 +9,10 @@ No HTTP sessions, no scraping, no caching of its own.
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 
 from cache import cache, ONE_DAY
+from executors import WORK_EXECUTOR
 from utils import normalize_title, IS_DEV, export_debug_json
 from sse import _get_or_create_streams
 
@@ -59,23 +60,25 @@ def get_recommendations(
         _debug_export_seed(highly_rated)
 
     recs = []
-    with ThreadPoolExecutor(max_workers=min(max_workers, SIMILAR_WORKERS)) as ex:
-        futures = [
-            ex.submit(
-                _get_similar,
-                tmdb_client,
-                streaming_client,
-                film,
-                seen_ids,
-                seen_titles_norm,
-                stream_queues,
-                force_refresh,
-                username,
-            )
-            for film in highly_rated
-        ]
-        for f in as_completed(futures):
+    futures = [
+        WORK_EXECUTOR.submit(
+            _get_similar,
+            tmdb_client,
+            streaming_client,
+            film,
+            seen_ids,
+            seen_titles_norm,
+            stream_queues,
+            force_refresh,
+            username,
+        )
+        for film in highly_rated
+    ]
+    for f in as_completed(futures):
+        try:
             recs.extend(f.result())
+        except Exception:
+            logger.exception("Similar-film task failed")
 
     unique: dict = {}
     for r in recs:

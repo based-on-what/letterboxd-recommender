@@ -186,6 +186,8 @@ INTERNAL_TOKEN=
 | `CACHE_MAX_SIZE` | No | `10000` | Maximo de entradas en la cache en memoria antes de eviccion LRU |
 | `STREAM_MAX_AGE_S` | No | `3600` | Segundos antes de evictar un stream SSE inactivo de la memoria |
 | `SSE_QUEUE_MAXSIZE` | No | `1000` | Maximo de mensajes por cola SSE; al desbordar se descartan los mas antiguos |
+| `SCRAPE_POOL_SIZE` | No | `6` | Threads del pool compartido de scraping de Letterboxd (por proceso) |
+| `WORK_POOL_SIZE` | No | `8` | Threads del pool compartido de enriquecimiento/recomendacion (por proceso) |
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) para requests de scraping a Letterboxd (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) para requests a la API de TMDB |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Timeout (s) de carga de pagina para el fallback camoufox (navegador headless) |

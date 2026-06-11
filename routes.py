@@ -12,15 +12,15 @@ import os
 import queue
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from uuid import uuid4
 
 from flask import Blueprint, Response, current_app, g, jsonify, request, stream_with_context
 
 from cache import cache
+from executors import WORK_EXECUTOR, WORK_POOL_SIZE
 from limiter import limiter
 from recommender import (
-    ENRICH_WORKERS,
     IS_DEV,
     MovieRecommender,
     _export_debug_json,
@@ -320,23 +320,22 @@ def _enrich_films(rec_sys, user_films: list, start: float) -> list:
     completed = 0
     enrich_start = time.time()
 
-    logger.info("Enriching %d films with TMDB metadata (workers=%d)", total, ENRICH_WORKERS)
+    logger.info("Enriching %d films with TMDB metadata (workers=%d)", total, WORK_POOL_SIZE)
 
-    with ThreadPoolExecutor(max_workers=ENRICH_WORKERS) as ex:
-        futures = [ex.submit(enrich_film_task, rec_sys, film) for film in user_films]
-        for fut in as_completed(futures):
-            completed += 1
-            try:
-                result = fut.result()
-                if result:
-                    enriched.append(result)
-            except Exception as exc:
-                logger.error("Enrichment task failed: %s", exc)
+    futures = [WORK_EXECUTOR.submit(enrich_film_task, rec_sys, film) for film in user_films]
+    for fut in as_completed(futures):
+        completed += 1
+        try:
+            result = fut.result()
+            if result:
+                enriched.append(result)
+        except Exception as exc:
+            logger.error("Enrichment task failed: %s", exc)
 
-            if completed % interval == 0 or completed == total:
-                logger.info("Enrichment: %d/%d (%.0f%%) | ok=%d | elapsed=%.2fs",
-                            completed, total, completed / max(total, 1) * 100,
-                            len(enriched), time.time() - enrich_start)
+        if completed % interval == 0 or completed == total:
+            logger.info("Enrichment: %d/%d (%.0f%%) | ok=%d | elapsed=%.2fs",
+                        completed, total, completed / max(total, 1) * 100,
+                        len(enriched), time.time() - enrich_start)
 
     logger.info("Enrichment done in %.2fs", time.time() - enrich_start)
     return enriched

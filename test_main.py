@@ -159,6 +159,36 @@ def test_recommend_response_marks_stale_cache_usage():
     assert body['data_freshness'] == 'stale_cache'
 
 
+def test_concurrent_recommendations_on_shared_pool():
+    import threading
+
+    r = main.MovieRecommender()
+    r.tmdb_key = 'k'
+    seed = [{'tmdb_id': 1, 'title': 'Seen', 'user_rating': 4.5}]
+    sim_resp = _resp({'results': [{'id': 2, 'title': 'Rec'}]})
+    results = []
+
+    with patch.object(main.cache, 'get', return_value=None), \
+         patch.object(main.cache, 'set'), \
+         patch.object(r._tmdb, '_get', return_value=sim_resp), \
+         patch.object(r._tmdb, 'get_details_by_id', return_value={
+             'tmdb_id': 2, 'title': 'Rec', 'original_title': 'Rec', 'rating_tmdb': 8.0,
+         }), \
+         patch.object(r._streaming, 'get_by_tmdb_id', return_value=[]), \
+         patch.object(r._streaming, 'get_by_title', return_value=[]):
+        def run():
+            results.append(r.get_recommendations(list(seed)))
+
+        threads = [threading.Thread(target=run) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    assert len(results) == 5
+    assert all(res and res[0]['tmdb_id'] == 2 for res in results)
+
+
 def test_sse_bounded_queue_drops_oldest_without_blocking():
     from sse import BoundedDropQueue
 

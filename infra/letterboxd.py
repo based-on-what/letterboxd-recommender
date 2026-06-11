@@ -8,12 +8,13 @@ Does NOT know about recommendations or preferences.
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 
 import requests
 from bs4 import BeautifulSoup
 
 from cache import cache, USER_CACHE_TTL, USER_STALE_CACHE_TTL
+from executors import SCRAPE_EXECUTOR
 from infra.http import (
     CAMOUFOX_TIMEOUT,
     INCIDENT_TRACKER,
@@ -214,15 +215,20 @@ class LetterboxdClient:
             films = []
 
             logger.info("Scraping %d pages from %s's profile", pages, username)
-            with ThreadPoolExecutor(max_workers=self._max_workers) as ex:
-                futures = [ex.submit(self._scrape_page, p, base_url, headers, rating_map) for p in range(1, pages + 1)]
-                completed = 0
-                interval = max(1, pages // 10)
-                for f in as_completed(futures):
+            futures = [
+                SCRAPE_EXECUTOR.submit(self._scrape_page, p, base_url, headers, rating_map)
+                for p in range(1, pages + 1)
+            ]
+            completed = 0
+            interval = max(1, pages // 10)
+            for f in as_completed(futures):
+                try:
                     films.extend(f.result())
-                    completed += 1
-                    if completed % interval == 0 or completed == pages:
-                        logger.info("Scrape: %d/%d pages | %d films", completed, pages, len(films))
+                except Exception:
+                    logger.exception("Scrape page task failed for %s", username)
+                completed += 1
+                if completed % interval == 0 or completed == pages:
+                    logger.info("Scrape: %d/%d pages | %d films", completed, pages, len(films))
 
             if not include_unrated:
                 films = [f for f in films if f.get('has_rating')]
