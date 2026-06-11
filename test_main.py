@@ -381,6 +381,18 @@ def test_concurrent_recommendations_on_shared_pool():
     assert all(res and res[0]['tmdb_id'] == 2 for res in results)
 
 
+def test_request_id_propagates_to_worker_threads():
+    from executors import WORK_EXECUTOR, submit_with_context
+    from sse import REQUEST_ID_CTX
+
+    token = REQUEST_ID_CTX.set('ctx-rid')
+    try:
+        fut = submit_with_context(WORK_EXECUTOR, REQUEST_ID_CTX.get)
+        assert fut.result(timeout=5) == 'ctx-rid'
+    finally:
+        REQUEST_ID_CTX.reset(token)
+
+
 def test_sse_publish_subscribe_in_memory_roundtrip():
     import sse
 

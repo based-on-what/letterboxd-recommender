@@ -18,7 +18,7 @@ from uuid import uuid4
 from flask import Blueprint, Response, current_app, g, jsonify, request, stream_with_context
 
 from cache import cache
-from executors import PIPELINE_EXECUTOR, WORK_EXECUTOR, WORK_POOL_SIZE
+from executors import PIPELINE_EXECUTOR, WORK_EXECUTOR, WORK_POOL_SIZE, submit_with_context
 from limiter import limiter
 from recommender import (
     IS_DEV,
@@ -228,6 +228,7 @@ def recommend():
 
     request_id = data.get('request_id') or str(uuid4())
     g.request_id = request_id
+    REQUEST_ID_CTX.set(request_id)  # carried into worker threads via submit_with_context
     _get_or_create_streams(request_id)
 
     # Legacy synchronous mode: run the pipeline inside the request thread.
@@ -381,7 +382,7 @@ def _enrich_films(rec_sys, user_films: list, start: float) -> list:
 
     logger.info("Enriching %d films with TMDB metadata (workers=%d)", total, WORK_POOL_SIZE)
 
-    futures = [WORK_EXECUTOR.submit(enrich_film_task, rec_sys, film) for film in user_films]
+    futures = [submit_with_context(WORK_EXECUTOR, enrich_film_task, rec_sys, film) for film in user_films]
     for fut in as_completed(futures):
         completed += 1
         try:

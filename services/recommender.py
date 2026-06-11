@@ -15,7 +15,7 @@ from threading import Lock
 from typing import Callable, Optional
 
 from cache import cache, ONE_DAY
-from executors import WORK_EXECUTOR
+from executors import WORK_EXECUTOR, submit_with_context
 from utils import normalize_title, IS_DEV, export_debug_json
 
 logger = logging.getLogger("letterboxd-recommender")
@@ -98,7 +98,7 @@ def get_recommendations(
 
     recs = []
     futures = [
-        WORK_EXECUTOR.submit(_get_similar, tmdb_client, streaming_client, film, ctx)
+        submit_with_context(WORK_EXECUTOR, _get_similar, tmdb_client, streaming_client, film, ctx)
         for film in highly_rated
     ]
     for f in as_completed(futures):

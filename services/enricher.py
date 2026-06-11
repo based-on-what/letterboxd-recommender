@@ -10,7 +10,7 @@ import logging
 from concurrent.futures import as_completed
 from typing import Callable, Optional
 
-from executors import WORK_EXECUTOR
+from executors import WORK_EXECUTOR, submit_with_context
 
 logger = logging.getLogger("letterboxd-recommender")
 
@@ -50,7 +50,7 @@ def batch_enrich(tmdb_client, films: list, max_workers: int = 6) -> list:
     shared WORK_EXECUTOR pool.
     """
     enriched = []
-    futures = [WORK_EXECUTOR.submit(_enrich, tmdb_client.get_details, film) for film in films]
+    futures = [submit_with_context(WORK_EXECUTOR, _enrich, tmdb_client.get_details, film) for film in films]
     for fut in as_completed(futures):
         try:
             result = fut.result()

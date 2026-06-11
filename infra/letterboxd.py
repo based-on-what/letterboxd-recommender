@@ -14,7 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from cache import cache, USER_CACHE_TTL, USER_STALE_CACHE_TTL
-from executors import SCRAPE_EXECUTOR
+from executors import SCRAPE_EXECUTOR, submit_with_context
 from infra.http import (
     CAMOUFOX_TIMEOUT,
     INCIDENT_TRACKER,
@@ -240,7 +240,7 @@ class LetterboxdClient:
 
             logger.info("Scraping %d pages from %s's profile", pages, username)
             futures = [
-                SCRAPE_EXECUTOR.submit(self._scrape_page, p, base_url, headers, rating_map)
+                submit_with_context(SCRAPE_EXECUTOR, self._scrape_page, p, base_url, headers, rating_map)
                 for p in range(1, pages + 1)
             ]
             completed = 0
