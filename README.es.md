@@ -97,6 +97,7 @@ Si el scraping en vivo de Letterboxd falla (circuit breaker abierto), la API dev
 
 - **[Railway](https://railway.app/)**: Plataforma cloud de hosting
 - **[Procfile](https://devcenter.heroku.com/articles/procfile)**: `gunicorn` con workers `gthread`, timeout de 180s
+- **Capacidad**: ver [docs/capacity.md](docs/capacity.md) para limites de concurrencia y guia de escalado
 
 ---
 

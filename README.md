@@ -97,6 +97,7 @@ If live Letterboxd scraping fails (circuit breaker open), the API returns a cach
 
 - **[Railway](https://railway.app/)**: Cloud platform hosting
 - **[Procfile](https://devcenter.heroku.com/articles/procfile)**: `gunicorn` with `gthread` workers, 180s timeout
+- **Capacity**: see [docs/capacity.md](docs/capacity.md) for concurrency limits and scaling guidance
 
 ---
 

@@ -273,6 +273,7 @@ web: gunicorn main:app --bind 0.0.0.0:$PORT --workers 2 --worker-class gthread -
 - `gthread` permite múltiples threads por worker (necesario para SSE + ThreadPoolExecutor concurrente).
 - Timeout 180s: el pipeline completo puede tardar en perfiles grandes.
 - `$PORT` lo provee Railway automáticamente.
+- **Capacidad real**: ~2 usuarios activos concurrentes con streams en vivo (cada usuario sostiene 3 conexiones SSE y hay 2×4=8 threads de request). Los pipelines corren en `PIPELINE_EXECUTOR` (4 por proceso) y no bloquean threads HTTP. Detalle y guía de escalado en `docs/capacity.md`.
 
 ---
 
