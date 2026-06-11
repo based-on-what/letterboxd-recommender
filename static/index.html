@@ -6,7 +6,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <title>Letterboxd Recommender</title>
-  <link rel="stylesheet" href="/styles.css?v=1">
+  <link rel="stylesheet" href="/styles.css?v=2">
   <style>
     html { scroll-behavior: smooth; }
 
@@ -321,7 +321,7 @@
     <div class="recommendations-grid" id="recommendations-grid"></div>
   </section>
 
-  <script src="/app.js?v=1"></script>
+  <script src="/app.js?v=2"></script>
   <script>
     let startTime;
     let timerInterval;
@@ -360,25 +360,36 @@
         `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
     }
 
+    // Reflect SSE connection health in the loading status line.
+    function updateStreamHealth(state) {
+      const statusEl = document.querySelector('.status');
+      if (!statusEl) return;
+      if (state === 'reconnecting') {
+        statusEl.textContent = 'Reconnecting…';
+      } else if (state === 'failed') {
+        statusEl.textContent = 'Live updates lost — results will still load when ready.';
+      } else {
+        statusEl.textContent = 'Analyzing profile & fetching data...';
+      }
+    }
+
     // Connect to SSE logs stream
     function connectToLogsStream(requestId) {
       if (eventSource) {
         eventSource.close();
       }
 
-      eventSource = new EventSource(`/api/logs-stream?request_id=${encodeURIComponent(requestId)}`);
-
-      eventSource.onmessage = function(event) {
-        if (event.data && event.data !== 'heartbeat') {
-          console.log('[SERVER]', event.data);
-          addLiveLogLine(event.data);
-          updateProgressFromLog(event.data);
-        }
-      };
-
-      eventSource.onerror = function() {
-        console.warn('[LOGS] Connection lost, will attempt to reconnect...');
-      };
+      eventSource = createReconnectingStream(
+        `/api/logs-stream?request_id=${encodeURIComponent(requestId)}`,
+        function(event) {
+          if (event.data && event.data !== 'heartbeat') {
+            console.log('[SERVER]', event.data);
+            addLiveLogLine(event.data);
+            updateProgressFromLog(event.data);
+          }
+        },
+        updateStreamHealth
+      );
     }
 
     // Connect to status stream to track seed-film processing.
@@ -387,26 +398,28 @@
         statusEventSource.close();
       }
 
-      statusEventSource = new EventSource(`/api/status-stream?request_id=${encodeURIComponent(requestId)}`);
-      statusEventSource.onmessage = function(event) {
-        if (!event.data || event.data === 'heartbeat') return;
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload.status === 'complete') {
-            setProgress(98, 'Finalizing recommendations...');
-            disconnectFromStatusStream();
-            return;
-          }
+      statusEventSource = createReconnectingStream(
+        `/api/status-stream?request_id=${encodeURIComponent(requestId)}`,
+        function(event) {
+          if (!event.data || event.data === 'heartbeat') return;
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.status === 'complete') {
+              setProgress(98, 'Finalizing recommendations...');
+              disconnectFromStatusStream();
+              return;
+            }
 
-          if (payload.title) {
-            processedSeedFilms += 1;
-            const ratio = totalSeedFilms > 0 ? Math.min(1, processedSeedFilms / totalSeedFilms) : 0;
-            const pct = 60 + Math.round(ratio * 35);
-            setProgress(pct, `Analyzing favorites: ${processedSeedFilms}/${Math.max(totalSeedFilms, processedSeedFilms)}`);
-            addLiveLogLine(`Analyzing: ${payload.title} (${payload.user_rating || 0}★)`);
-          }
-        } catch (_e) {}
-      };
+            if (payload.title) {
+              processedSeedFilms += 1;
+              const ratio = totalSeedFilms > 0 ? Math.min(1, processedSeedFilms / totalSeedFilms) : 0;
+              const pct = 60 + Math.round(ratio * 35);
+              setProgress(pct, `Analyzing favorites: ${processedSeedFilms}/${Math.max(totalSeedFilms, processedSeedFilms)}`);
+              addLiveLogLine(`Analyzing: ${payload.title} (${payload.user_rating || 0}★)`);
+            }
+          } catch (_e) {}
+        }
+      );
     }
 
     function disconnectFromStatusStream() {
@@ -506,30 +519,26 @@
         recsEventSource.close();
       }
 
-      recsEventSource = new EventSource(`/api/recommendations-stream?request_id=${encodeURIComponent(requestId)}`);
+      recsEventSource = createReconnectingStream(
+        `/api/recommendations-stream?request_id=${encodeURIComponent(requestId)}`,
+        function(event) {
+          try {
+            const data = JSON.parse(event.data);
 
-      recsEventSource.onmessage = function(event) {
-        try {
-          const data = JSON.parse(event.data);
+            if (data.status === 'complete') {
+              disconnectFromRecommendationsStream();
+              return;
+            }
 
-          if (data.status === 'complete') {
-            recsEventSource.close();
-            recsEventSource = null;
-            return;
+            // Add recommendation to live display
+            liveRecommendations.push(data);
+            addRecommendationToGrid(data);
+
+          } catch (e) {
+            console.error('[RECS] Error parsing recommendation:', e);
           }
-
-          // Add recommendation to live display
-          liveRecommendations.push(data);
-          addRecommendationToGrid(data);
-
-        } catch (e) {
-          console.error('[RECS] Error parsing recommendation:', e);
         }
-      };
-
-      recsEventSource.onerror = function() {
-        console.warn('[RECS] Connection lost');
-      };
+      );
     }
 
     // Disconnect from recommendations stream
@@ -626,7 +635,7 @@
       timerInterval = setInterval(updateTimer, 50);
 
       try {
-        const response = await fetch('/api/recommend', {
+        const response = await fetchWithTimeout('/api/recommend', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({username, country: userCountry, request_id: activeRequestId})

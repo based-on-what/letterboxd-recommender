@@ -6,7 +6,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <title>Letterboxd Recommender</title>
-  <link rel="stylesheet" href="/styles.css?v=1">
+  <link rel="stylesheet" href="/styles.css?v=2">
   <style>
     body {
       background: var(--bg);
@@ -382,7 +382,7 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="/app.js?v=1"></script>
+  <script src="/app.js?v=2"></script>
   <script>
     // Global variables
     const username = window.location.pathname.substring(1);
@@ -421,11 +421,13 @@
     async function init() {
       const cacheKey = `lb_data_${username}`;
       const cached = localStorage.getItem(cacheKey);
+      const CACHE_TTL_MS = 30 * 60 * 1000; // matches the server's fresh-profile TTL
 
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
-          if (parsed.data && parsed.data.recommendations) {
+          const fresh = parsed.timestamp && (Date.now() - parsed.timestamp) < CACHE_TTL_MS;
+          if (fresh && parsed.data && parsed.data.recommendations) {
             render(parsed.data);
             if (parsed.executionTime) {
               document.getElementById('timerDisplay').textContent = formatTime(parsed.executionTime);
@@ -433,8 +435,10 @@
             document.getElementById('loader').style.display = 'none';
             return;
           }
+          localStorage.removeItem(cacheKey); // stale or malformed: refetch
         } catch(e) {
           console.error("Cache parse error", e);
+          localStorage.removeItem(cacheKey);
         }
       }
 
@@ -446,29 +450,35 @@
         ? window.crypto.randomUUID()
         : `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-      statusEventSource = new EventSource(`/api/status-stream?request_id=${encodeURIComponent(requestId)}`);
-      statusEventSource.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload.status === 'complete') {
-            liveStatusDisplay.style.display = 'none';
-            statusEventSource.close();
-            statusEventSource = null;
-            return;
+      statusEventSource = createReconnectingStream(
+        `/api/status-stream?request_id=${encodeURIComponent(requestId)}`,
+        (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.status === 'complete') {
+              liveStatusDisplay.style.display = 'none';
+              if (statusEventSource) {
+                statusEventSource.close();
+                statusEventSource = null;
+              }
+              return;
+            }
+            const rating = Number(payload.user_rating || 0).toFixed(1);
+            liveStatusDisplay.textContent = `Analyzing: ${payload.title} — ${payload.username}'s rating: ${rating}`;
+            liveStatusDisplay.style.display = 'block';
+          } catch (err) {
+            console.warn('Status stream parse error', err);
           }
-          const rating = Number(payload.user_rating || 0).toFixed(1);
-          liveStatusDisplay.textContent = `Analyzing: ${payload.title} — ${payload.username}'s rating: ${rating}`;
-          liveStatusDisplay.style.display = 'block';
-        } catch (err) {
-          console.warn('Status stream parse error', err);
+        },
+        (state) => {
+          if (state === 'reconnecting') {
+            liveStatusDisplay.textContent = 'Reconnecting…';
+            liveStatusDisplay.style.display = 'block';
+          } else if (state === 'failed') {
+            liveStatusDisplay.style.display = 'none';
+          }
         }
-      };
-      statusEventSource.onerror = () => {
-        if (statusEventSource) {
-          statusEventSource.close();
-          statusEventSource = null;
-        }
-      };
+      );
 
       timerInterval = setInterval(() => {
         const elapsed = new Date() - start;
@@ -476,7 +486,7 @@
       }, 100);
 
       try {
-        const res = await fetch('/api/recommend', {
+        const res = await fetchWithTimeout('/api/recommend', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
