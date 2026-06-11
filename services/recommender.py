@@ -14,7 +14,7 @@ from concurrent.futures import as_completed
 from cache import cache, ONE_DAY
 from executors import WORK_EXECUTOR
 from utils import normalize_title, IS_DEV, export_debug_json
-from sse import _get_or_create_streams
+from sse import publish
 
 logger = logging.getLogger("letterboxd-recommender")
 
@@ -33,8 +33,6 @@ def get_recommendations(
     username=None,
     max_workers: int = 4,
 ) -> list:
-    stream_queues = _get_or_create_streams(request_id) if request_id else None
-
     seen_ids: set = set()
     seen_titles_norm: set = set()
     for film in enriched_films:
@@ -68,7 +66,7 @@ def get_recommendations(
             film,
             seen_ids,
             seen_titles_norm,
-            stream_queues,
+            request_id,
             force_refresh,
             username,
         )
@@ -100,15 +98,15 @@ def _get_similar(
     film: dict,
     seen_ids: set,
     seen_titles_norm: set,
-    stream_queues,
+    request_id,
     force_refresh: bool,
     username,
 ) -> list:
     if not film.get('tmdb_id'):
         return []
 
-    if stream_queues is not None:
-        stream_queues['status'].put({
+    if request_id:
+        publish(request_id, 'status', {
             'title': film.get('title', 'Untitled'),
             'user_rating': film.get('user_rating', 0),
             'username': username or 'user',
@@ -163,9 +161,9 @@ def _get_similar(
             ):
                 continue
             local.append(det)
-            if stream_queues is not None:
+            if request_id:
                 try:
-                    stream_queues['recommendations'].put({
+                    publish(request_id, 'recommendations', {
                         k: det.get(k)
                         for k in ('tmdb_id', 'title', 'year', 'rating_tmdb', 'poster',
                                   'director', 'genres', 'runtime', 'streaming', 'reason')

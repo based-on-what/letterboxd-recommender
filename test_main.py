@@ -189,6 +189,67 @@ def test_concurrent_recommendations_on_shared_pool():
     assert all(res and res[0]['tmdb_id'] == 2 for res in results)
 
 
+def test_sse_publish_subscribe_in_memory_roundtrip():
+    import sse
+
+    rid = 'rid-mem-roundtrip'
+    sub = sse.subscribe(rid, 'recommendations')
+    sse.publish(rid, 'recommendations', {'tmdb_id': 7, 'title': 'X'})
+    assert sub.get(timeout=1) == {'tmdb_id': 7, 'title': 'X'}
+    sub.close()
+    sse._cleanup_request_streams(rid)
+
+
+def test_sse_redis_pubsub_delivers_across_clients():
+    import json
+    import queue as q
+
+    import sse
+
+    channels: dict = {}
+
+    class FakePubSub:
+        def __init__(self):
+            self.msgs = []
+
+        def subscribe(self, ch):
+            channels.setdefault(ch, []).append(self)
+
+        def get_message(self, ignore_subscribe_messages=True, timeout=None):
+            if self.msgs:
+                return {'type': 'message', 'data': self.msgs.pop(0)}
+            return None
+
+        def unsubscribe(self):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeRedis:
+        def pubsub(self):
+            return FakePubSub()
+
+        def publish(self, ch, data):
+            for s in channels.get(ch, []):
+                s.msgs.append(data)
+
+    old = (sse._redis_client, sse._redis_attempted)
+    sse._redis_client, sse._redis_attempted = FakeRedis(), True
+    try:
+        sub = sse.subscribe('rid-redis', 'logs')          # consumer "worker"
+        FakeRedis().publish('sse:rid-redis:logs', json.dumps('hola'))  # producer "worker"
+        assert sub.get(timeout=1) == 'hola'
+        try:
+            sub.get(timeout=0)
+            raise AssertionError('expected queue.Empty')
+        except q.Empty:
+            pass
+        sub.close()
+    finally:
+        sse._redis_client, sse._redis_attempted = old
+
+
 def test_sse_bounded_queue_drops_oldest_without_blocking():
     from sse import BoundedDropQueue
 

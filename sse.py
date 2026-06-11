@@ -8,6 +8,7 @@ Provides:
 """
 
 import contextvars
+import json
 import os
 import time
 import queue
@@ -143,6 +144,94 @@ def _track_stream_connection(request_id: str, stream_name: str, connected: bool)
 
 
 # ---------------------------------------------------------------------------
+# Pub/sub delivery — Redis when REDIS_URL is set, in-memory queues otherwise
+# ---------------------------------------------------------------------------
+# With 2+ gunicorn workers a client's SSE connection may land on a different
+# worker than the one running the pipeline; Redis pub/sub (one channel per
+# request_id per stream) carries messages across workers. The in-memory
+# queues remain the single-worker fallback. Note: pub/sub does not buffer —
+# subscribers must connect before messages are published (the frontend opens
+# its streams before POSTing /api/recommend).
+_redis_client = None
+_redis_attempted = False
+_REDIS_INIT_LOCK = Lock()
+
+
+def _get_redis():
+    global _redis_client, _redis_attempted
+    if _redis_attempted:
+        return _redis_client
+    with _REDIS_INIT_LOCK:
+        if _redis_attempted:
+            return _redis_client
+        _redis_attempted = True
+        url = os.getenv('REDIS_URL')
+        if not url:
+            return None
+        try:
+            import redis as _redis_lib
+            client = _redis_lib.from_url(url, decode_responses=True)
+            client.ping()
+            _redis_client = client
+            logger.info("SSE delivery using Redis pub/sub backend")
+        except Exception as exc:
+            logger.warning("SSE Redis unavailable; using in-memory queues: %s", exc)
+    return _redis_client
+
+
+def _channel(request_id: str, stream_name: str) -> str:
+    return f"sse:{request_id}:{stream_name}"
+
+
+def publish(request_id: str, stream_name: str, message) -> None:
+    """Send *message* to the stream's subscribers (cross-worker via Redis)."""
+    if not request_id:
+        return
+    r = _get_redis()
+    if r is not None:
+        try:
+            r.publish(_channel(request_id, stream_name), json.dumps(message))
+            return
+        except Exception as exc:
+            logger.debug("SSE publish via Redis failed, using memory: %s", exc)
+    _get_or_create_streams(request_id)[stream_name].put(message)
+
+
+class Subscription:
+    """Consumer handle: get(timeout) returns a message or raises queue.Empty."""
+
+    def __init__(self, request_id: str, stream_name: str):
+        r = _get_redis()
+        if r is not None:
+            self._pubsub = r.pubsub()
+            self._pubsub.subscribe(_channel(request_id, stream_name))
+            self._queue = None
+        else:
+            self._pubsub = None
+            self._queue = _get_or_create_streams(request_id)[stream_name]
+
+    def get(self, timeout: float = 1):
+        if self._pubsub is not None:
+            msg = self._pubsub.get_message(ignore_subscribe_messages=True, timeout=timeout)
+            if not msg or msg.get('type') != 'message':
+                raise queue.Empty
+            return json.loads(msg['data'])
+        return self._queue.get(timeout=timeout)
+
+    def close(self) -> None:
+        if self._pubsub is not None:
+            try:
+                self._pubsub.unsubscribe()
+                self._pubsub.close()
+            except Exception:
+                pass
+
+
+def subscribe(request_id: str, stream_name: str) -> Subscription:
+    return Subscription(request_id, stream_name)
+
+
+# ---------------------------------------------------------------------------
 # QueueHandler — routes log records into the per-request SSE logs queue
 # ---------------------------------------------------------------------------
 class QueueHandler(logging.Handler):
@@ -160,6 +249,6 @@ class QueueHandler(logging.Handler):
                 except RuntimeError:
                     request_id = None
             if request_id:
-                _get_or_create_streams(request_id)['logs'].put(msg)
+                publish(request_id, 'logs', msg)
         except Exception:
             self.handleError(record)

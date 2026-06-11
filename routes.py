@@ -34,6 +34,8 @@ from sse import (
     _mark_recommendations_done,
     _mark_status_done,
     _track_stream_connection,
+    publish,
+    subscribe,
 )
 
 logger = logging.getLogger("letterboxd-recommender")
@@ -90,17 +92,17 @@ def logs_stream():
     if not request_id:
         return jsonify({'error': 'request_id is required'}), 400
 
-    log_queue = _get_or_create_streams(request_id)['logs']
-
     def generate():
+        sub = subscribe(request_id, 'logs')
         _track_stream_connection(request_id, 'logs', True)
         try:
             while True:
                 try:
-                    yield f"data: {log_queue.get(timeout=1)}\n\n"
+                    yield f"data: {sub.get(timeout=1)}\n\n"
                 except queue.Empty:
                     yield ": heartbeat\n\n"
         finally:
+            sub.close()
             _track_stream_connection(request_id, 'logs', False)
 
     return Response(
@@ -117,14 +119,13 @@ def recommendations_stream():
     if not request_id:
         return jsonify({'error': 'request_id is required'}), 400
 
-    recs_queue = _get_or_create_streams(request_id)['recommendations']
-
     def generate():
+        sub = subscribe(request_id, 'recommendations')
         _track_stream_connection(request_id, 'recommendations', True)
         try:
             while True:
                 try:
-                    rec = recs_queue.get(timeout=2)
+                    rec = sub.get(timeout=2)
                     if rec == 'DONE':
                         yield "data: {\"status\": \"complete\"}\n\n"
                         break
@@ -134,6 +135,7 @@ def recommendations_stream():
         except Exception as exc:
             logger.debug("Recommendations stream ended for %s: %s", request_id, exc)
         finally:
+            sub.close()
             _track_stream_connection(request_id, 'recommendations', False)
 
     return Response(
@@ -150,14 +152,13 @@ def status_stream():
     if not request_id:
         return jsonify({'error': 'request_id is required'}), 400
 
-    status_queue = _get_or_create_streams(request_id)['status']
-
     def generate():
+        sub = subscribe(request_id, 'status')
         _track_stream_connection(request_id, 'status', True)
         try:
             while True:
                 try:
-                    status = status_queue.get(timeout=2)
+                    status = sub.get(timeout=2)
                     if status == 'DONE':
                         yield "data: {\"status\": \"complete\"}\n\n"
                         break
@@ -165,6 +166,7 @@ def status_stream():
                 except queue.Empty:
                     yield ": heartbeat\n\n"
         finally:
+            sub.close()
             _track_stream_connection(request_id, 'status', False)
 
     return Response(
@@ -398,9 +400,8 @@ def _signal_stream_done(request_id: str) -> None:
     try:
         _mark_recommendations_done(request_id)
         _mark_status_done(request_id)
-        streams = _get_or_create_streams(request_id)
-        streams['recommendations'].put('DONE')
-        streams['status'].put('DONE')
+        publish(request_id, 'recommendations', 'DONE')
+        publish(request_id, 'status', 'DONE')
     except Exception:
         pass
 
