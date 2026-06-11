@@ -144,6 +144,7 @@ class Cache:
             'similar':    _ExpiringDict(),
             'streaming':  _ExpiringDict(),
             'user_scrape': _ExpiringDict(),
+            'jobs':       _ExpiringDict(),
         }
 
     def _init_redis(self):

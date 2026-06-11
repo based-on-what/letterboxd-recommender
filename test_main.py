@@ -119,7 +119,7 @@ def test_routes_health_get_pages_recommend():
          patch.object(main.MovieRecommender, 'analyze_preferences', return_value={'genres': [], 'directors': [], 'decades': []}), \
          patch.object(main.MovieRecommender, 'get_recommendations', return_value=[]), \
          patch.object(main, 'enrich_film_task', return_value={'title': 'A', 'user_rating': 4}):
-        body = client.post('/api/recommend', json={'username': 'u'}).get_json()
+        body = client.post('/api/recommend', json={'username': 'u', 'sync': True}).get_json()
     assert 'request_id' in body
 
 
@@ -154,7 +154,7 @@ def test_recommend_response_marks_stale_cache_usage():
          patch.object(main.MovieRecommender, 'analyze_preferences', return_value={'genres': [], 'directors': [], 'decades': []}), \
          patch.object(main.MovieRecommender, 'get_recommendations', return_value=[]), \
          patch.object(main, 'enrich_film_task', return_value={'title': 'A', 'user_rating': 4}):
-        body = client.post('/api/recommend', json={'username': 'u'}).get_json()
+        body = client.post('/api/recommend', json={'username': 'u', 'sync': True}).get_json()
 
     assert body['data_freshness'] == 'stale_cache'
 
@@ -266,9 +266,34 @@ def test_recommend_503_exposes_incident_payload():
     client = main.app.test_client()
 
     with patch.object(main.MovieRecommender, 'get_all_rated_films', return_value=([], 0)):
-        resp = client.post('/api/recommend', json={'username': 'u'})
+        resp = client.post('/api/recommend', json={'username': 'u', 'sync': True})
 
     body = resp.get_json()
     assert resp.status_code in (404, 503)
     if resp.status_code == 503:
         assert 'incident' in body
+
+
+def test_recommend_async_returns_202_then_result():
+    import time as _t
+
+    client = main.app.test_client()
+
+    with patch.object(main.MovieRecommender, 'get_all_rated_films', return_value=([{'title': 'A', 'rating': 4}], 1)), \
+         patch.object(main.MovieRecommender, 'analyze_preferences', return_value={'genres': [], 'directors': [], 'decades': []}), \
+         patch.object(main.MovieRecommender, 'get_recommendations', return_value=[]), \
+         patch.object(main, 'enrich_film_task', return_value={'title': 'A', 'user_rating': 4}):
+        resp = client.post('/api/recommend', json={'username': 'u'})
+        assert resp.status_code == 202
+        rid = resp.get_json()['request_id']
+
+        result = None
+        for _ in range(100):
+            result = client.get(f'/api/result?request_id={rid}')
+            if result.status_code != 202:
+                break
+            _t.sleep(0.1)
+
+    assert result.status_code == 200
+    assert result.get_json()['username'] == 'u'
+    assert client.get('/api/result?request_id=nope').status_code == 404

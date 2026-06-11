@@ -7,6 +7,7 @@ Provides:
 - Helper functions for connection tracking and stream cleanup.
 """
 
+import contextvars
 import os
 import time
 import queue
@@ -19,6 +20,10 @@ except ImportError:  # outside Flask context (tests that don't need SSE)
     g = None  # type: ignore
 
 logger = logging.getLogger("letterboxd-recommender")
+
+# request_id for code running outside a Flask request context (background
+# pipeline jobs, executor worker threads). Checked before flask.g.
+REQUEST_ID_CTX: contextvars.ContextVar = contextvars.ContextVar('request_id', default=None)
 
 # ---------------------------------------------------------------------------
 # Stream registry
@@ -147,6 +152,8 @@ class QueueHandler(logging.Handler):
         try:
             msg = self.format(record)
             request_id = getattr(record, 'request_id', None)
+            if not request_id:
+                request_id = REQUEST_ID_CTX.get()
             if not request_id and g is not None:
                 try:
                     request_id = getattr(g, 'request_id', None)

@@ -18,7 +18,7 @@ from uuid import uuid4
 from flask import Blueprint, Response, current_app, g, jsonify, request, stream_with_context
 
 from cache import cache
-from executors import WORK_EXECUTOR, WORK_POOL_SIZE
+from executors import PIPELINE_EXECUTOR, WORK_EXECUTOR, WORK_POOL_SIZE
 from limiter import limiter
 from recommender import (
     IS_DEV,
@@ -29,6 +29,7 @@ from recommender import (
     INCIDENT_TRACKER,
 )
 from sse import (
+    REQUEST_ID_CTX,
     _get_or_create_streams,
     _mark_recommendations_done,
     _mark_status_done,
@@ -40,6 +41,8 @@ logger = logging.getLogger("letterboxd-recommender")
 bp = Blueprint('api', __name__)
 
 _USERNAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
+
+JOB_RESULT_TTL = int(os.getenv('JOB_RESULT_TTL', '900'))  # seconds an async result stays fetchable
 
 # Singleton used by lightweight endpoints that only need page-count lookups.
 # Created lazily to avoid import-time failures when TMDB_KEY is not yet set.
@@ -213,7 +216,6 @@ def get_pages():
 @bp.route('/api/recommend', methods=['POST'])
 @limiter.limit('5 per minute')
 def recommend():
-    start = time.time()
     data = request.get_json() or {}
 
     username = (data.get('username') or '').strip()
@@ -226,6 +228,58 @@ def recommend():
     g.request_id = request_id
     _get_or_create_streams(request_id)
 
+    # Legacy synchronous mode: run the pipeline inside the request thread.
+    if data.get('sync'):
+        payload, status, headers = _build_recommendation_result(username, data, request_id)
+        resp = jsonify(payload)
+        for k, v in headers.items():
+            resp.headers[k] = v
+        return resp, status
+
+    cache.set('jobs', request_id, {'status': 'pending'}, ttl=JOB_RESULT_TTL)
+    PIPELINE_EXECUTOR.submit(_run_pipeline_job, username, data, request_id)
+    return jsonify({'request_id': request_id, 'username': username, 'status': 'accepted'}), 202
+
+
+@bp.route('/api/result', methods=['GET'])
+@limiter.limit('60 per minute')
+def job_result():
+    request_id = request.args.get('request_id')
+    if not request_id:
+        return jsonify({'error': 'request_id is required'}), 400
+
+    job = cache.get('jobs', request_id)
+    if job is None:
+        return jsonify({'error': 'unknown or expired request_id'}), 404
+    if job.get('status') == 'pending':
+        return jsonify({'status': 'pending', 'request_id': request_id}), 202
+
+    resp = jsonify(job.get('payload'))
+    for k, v in (job.get('headers') or {}).items():
+        resp.headers[k] = v
+    return resp, job.get('status_code', 200)
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+def _run_pipeline_job(username: str, data: dict, request_id: str) -> None:
+    """Background pipeline run; stores its outcome in the jobs cache."""
+    token = REQUEST_ID_CTX.set(request_id)
+    try:
+        payload, status, headers = _build_recommendation_result(username, data, request_id)
+    finally:
+        REQUEST_ID_CTX.reset(token)
+    cache.set(
+        'jobs', request_id,
+        {'payload': payload, 'status_code': status, 'headers': headers},
+        ttl=JOB_RESULT_TTL,
+    )
+
+
+def _build_recommendation_result(username: str, data: dict, request_id: str):
+    """Run the full pipeline. Returns (payload_dict, status_code, headers_dict)."""
+    start = time.time()
     try:
         rec_sys = MovieRecommender(country=data.get('country', 'CL'))
 
@@ -236,7 +290,8 @@ def recommend():
         logger.info("Fetched %d films in %.2fs", len(user_films), time.time() - start)
 
         if not user_films:
-            return _handle_empty_profile(rec_sys, username, request_id)
+            _signal_stream_done(request_id)
+            return _empty_profile_result(rec_sys, username, request_id)
 
         # 2. Enrich with TMDB metadata
         enriched = _enrich_films(rec_sys, user_films, start)
@@ -278,39 +333,37 @@ def recommend():
             )
             payload['incident'] = INCIDENT_TRACKER.snapshot()
 
-        return jsonify(payload)
+        return payload, 200, {}
 
     except Exception:
         logger.exception("Error generating recommendations")
-        return jsonify({'error': 'internal server error'}), 500
+        _signal_stream_done(request_id)
+        return {'error': 'internal server error', 'request_id': request_id}, 500, {}
 
 
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
-def _handle_empty_profile(rec_sys, username, request_id):
+def _empty_profile_result(rec_sys, username, request_id):
     failures = rec_sys._letterboxd_last_failures[-8:]
     blocked = any('status=403' in f for f in failures)
     throttled = any(('status=429' in f) or ('status=503' in f) for f in failures)
 
     if blocked or throttled:
         incident = INCIDENT_TRACKER.snapshot()
-        resp = jsonify({
+        headers = {}
+        if incident.get('letterboxd_circuit_open'):
+            headers['Retry-After'] = str(incident.get('letterboxd_circuit_retry_after_s', 0))
+        return {
             'error': 'Could not read this public Letterboxd profile from the server network (blocked/throttled by Letterboxd).',
             'username': username,
             'request_id': request_id,
             'hint': 'Try again in a few minutes. If it persists, use a deployment region/proxy with lower bot reputation risk.',
-        })
-        if incident.get('letterboxd_circuit_open'):
-            resp.headers['Retry-After'] = str(incident.get('letterboxd_circuit_retry_after_s', 0))
-        return resp, 503
+        }, 503, headers
 
-    return jsonify({
+    return {
         'error': 'No movies found for this username.',
         'username': username,
         'request_id': request_id,
         'hint': 'Check backend logs for Letterboxd HTTP status / proxy diagnostics.',
-    }), 404
+    }, 404, {}
 
 
 def _enrich_films(rec_sys, user_films: list, start: float) -> list:

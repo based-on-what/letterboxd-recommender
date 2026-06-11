@@ -158,6 +158,8 @@ Cuando el circuito está abierto, `get_all_rated_films` sirve el perfil desde la
 | `SSE_QUEUE_MAXSIZE` | No | `1000` | Máximo de mensajes por cola SSE (drop-oldest al desbordar) |
 | `SCRAPE_POOL_SIZE` | No | `6` | Threads del pool compartido de scraping (`executors.py`, por proceso) |
 | `WORK_POOL_SIZE` | No | `8` | Threads del pool compartido de enriquecimiento/recomendación (`executors.py`, por proceso) |
+| `PIPELINE_POOL_SIZE` | No | `4` | Jobs asíncronos de recomendación concurrentes por proceso |
+| `JOB_RESULT_TTL` | No | `900` | Segundos que el resultado de `/api/result` queda disponible |
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) de requests a Letterboxd (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) de requests a TMDB |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Timeout (s) de carga de página del fallback camoufox |
@@ -231,7 +233,8 @@ Al agregar tests nuevos, mantener el patrón `import main` y parchear a través 
 | `GET` | `/_health` | — | Estado del sistema + snapshot del circuit breaker |
 | `GET` | `/_incident-status` | 30/min | Circuit breaker detallado (protegido con `INTERNAL_TOKEN`) |
 | `POST` | `/api/get_pages` | 10/min | Devuelve número de páginas del perfil |
-| `POST` | `/api/recommend` | 5/min | Genera recomendaciones (respuesta completa + abre streams SSE) |
+| `POST` | `/api/recommend` | 5/min | Encola el pipeline y devuelve `202 {request_id}`; con `"sync": true` corre inline y devuelve la respuesta completa |
+| `GET` | `/api/result` | 60/min | Resultado del job asíncrono: `202` pendiente, `200` payload final, `404` desconocido/expirado |
 | `GET` | `/api/logs-stream` | 20/min | SSE: logs en tiempo real |
 | `GET` | `/api/recommendations-stream` | 20/min | SSE: recomendaciones según llegan |
 | `GET` | `/api/status-stream` | 20/min | SSE: estado del pipeline |

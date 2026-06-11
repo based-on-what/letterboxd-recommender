@@ -188,6 +188,8 @@ INTERNAL_TOKEN=
 | `SSE_QUEUE_MAXSIZE` | No | `1000` | Max messages per SSE queue; oldest are dropped on overflow |
 | `SCRAPE_POOL_SIZE` | No | `6` | Threads in the shared Letterboxd scraping pool (process-wide) |
 | `WORK_POOL_SIZE` | No | `8` | Threads in the shared enrichment/recommendation pool (process-wide) |
+| `PIPELINE_POOL_SIZE` | No | `4` | Concurrent async recommendation jobs per process |
+| `JOB_RESULT_TTL` | No | `900` | Seconds an async `/api/result` payload stays fetchable |
 | `LETTERBOXD_HTTP_TIMEOUT` | No | `12` | Timeout (s) for Letterboxd scraping requests (requests/cloudscraper/curl_cffi) |
 | `TMDB_HTTP_TIMEOUT` | No | `12` | Timeout (s) for TMDB API requests |
 | `CAMOUFOX_TIMEOUT` | No | `20` | Page-load timeout (s) for the camoufox headless-browser fallback |

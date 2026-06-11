@@ -544,6 +544,20 @@
       init();
     });
 
+    // Poll the async job result endpoint until completion (max ~3 min).
+    async function pollForResult(requestId) {
+      const deadline = Date.now() + 180000;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        const res = await fetch(`/api/result?request_id=${encodeURIComponent(requestId)}`);
+        if (res.status === 202) continue;
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || 'Unknown error');
+        return body;
+      }
+      throw new Error('Timed out waiting for recommendations. Please try again.');
+    }
+
     // Initialize app
     async function init() {
       const cacheKey = `lb_data_${username}`;
@@ -614,9 +628,14 @@
           })
         });
 
-        const data = await res.json();
+        let data = await res.json();
 
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok && res.status !== 202) throw new Error(data.error);
+
+        // 202 = async job accepted: poll /api/result until the pipeline finishes.
+        if (res.status === 202) {
+          data = await pollForResult(data.request_id || requestId);
+        }
 
         const timeTaken = new Date() - start;
         clearInterval(timerInterval);

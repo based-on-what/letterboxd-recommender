@@ -730,6 +730,20 @@
       shownMovieIds.clear();
     }
 
+    // Poll the async job result endpoint until completion (max ~3 min).
+    async function pollForResult(requestId) {
+      const deadline = Date.now() + 180000;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        const res = await fetch(`/api/result?request_id=${encodeURIComponent(requestId)}`);
+        if (res.status === 202) continue;
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || 'Unknown error');
+        return body;
+      }
+      throw new Error('Timed out waiting for recommendations. Please try again.');
+    }
+
     // Kick off the recommendation workflow for a provided username.
     async function startProcess() {
       const username = document.getElementById('username').value.trim();
@@ -759,10 +773,15 @@
           body: JSON.stringify({username, country: userCountry, request_id: activeRequestId})
         });
 
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Unknown error');
+        let data = await response.json();
+        if (!response.ok && response.status !== 202) throw new Error(data.error || 'Unknown error');
         if (data.request_id) {
           activeRequestId = data.request_id;
+        }
+
+        // 202 = async job accepted: poll /api/result until the pipeline finishes.
+        if (response.status === 202) {
+          data = await pollForResult(activeRequestId);
         }
 
         const endTime = new Date();
