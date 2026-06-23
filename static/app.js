@@ -1,6 +1,15 @@
 // app.js — helpers shared between index.html and results.html.
 // Page-specific logic stays inline in each page.
 
+// Theme toggle. The initial theme is applied by an inline <head> script on each
+// page to avoid a flash; this only handles the click + persistence afterward.
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  if (next === 'light') document.documentElement.dataset.theme = 'light';
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem('theme', next); } catch (e) {}
+}
+
 function getPlatformStyle(platform) {
   const p = platform.toLowerCase();
   if (p.includes('netflix'))                       return 'background:#E50914;color:#fff';
@@ -79,16 +88,16 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 180000) {
   }
 }
 
-// Poll the async job result endpoint until completion (max ~3 min).
+// Poll the async job result endpoint until the server says it's done (200)
+// or the job is gone (404). No client deadline: large profiles take as long
+// as they take; the only cap is the server's JOB_RESULT_TTL.
 async function pollForResult(requestId) {
-  const deadline = Date.now() + 180000;
-  while (Date.now() < deadline) {
+  while (true) {
     await new Promise(r => setTimeout(r, 2000));
     const res = await fetch(`/api/result?request_id=${encodeURIComponent(requestId)}`);
-    if (res.status === 202) continue;
+    if (res.status === 202) continue; // still pending
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'Unknown error');
     return body;
   }
-  throw new Error('Timed out waiting for recommendations. Please try again.');
 }

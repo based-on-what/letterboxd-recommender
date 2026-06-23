@@ -44,7 +44,7 @@ bp = Blueprint('api', __name__)
 
 _USERNAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
 
-JOB_RESULT_TTL = int(os.getenv('JOB_RESULT_TTL', '900'))  # seconds an async result stays fetchable
+JOB_RESULT_TTL = int(os.getenv('JOB_RESULT_TTL', '3600'))  # seconds a pending/finished async job stays fetchable
 
 # Singleton used by lightweight endpoints that only need page-count lookups.
 # Created lazily to avoid import-time failures when TMDB_KEY is not yet set.

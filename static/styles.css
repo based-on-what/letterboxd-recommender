@@ -4,6 +4,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  color-scheme: dark;
   --bg:          oklch(10.5% 0.010 60);
   --surface:     oklch(15% 0.012 60);
   --surface-hi:  oklch(21% 0.014 60);
@@ -13,9 +14,64 @@
   --text-3:      oklch(42% 0.010 60);
   --accent:      oklch(72% 0.11 143);
   --accent-hi:   oklch(80% 0.13 143);
+  --accent-ink:  oklch(12% 0.008 60);   /* text/icons on an accent fill */
   --gold:        oklch(78% 0.14 80);
   --danger:      oklch(58% 0.16 25);
+  /* Soft accent surfaces: selected chips, hover borders. */
+  --accent-soft:        oklch(18% 0.035 143);
+  --accent-soft-border: oklch(35% 0.06 143);
+  --accent-border:      oklch(38% 0.04 143);
+  --danger-soft:        oklch(16% 0.04 25);
+  --danger-border:      oklch(32% 0.06 25);
 }
+
+/* Light theme: same warm-neutral hue (60) and accent hues as dark, lightness
+   inverted. Accent/gold/danger darkened so text on the paper bg clears WCAG AA. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg:          oklch(96.5% 0.008 60);
+  --surface:     oklch(99.3% 0.004 60);
+  --surface-hi:  oklch(93% 0.010 60);
+  --border:      oklch(88% 0.012 60);
+  --text-1:      oklch(24% 0.014 60);
+  --text-2:      oklch(43% 0.014 60);
+  --text-3:      oklch(52% 0.012 60);
+  --accent:      oklch(52% 0.13 143);
+  --accent-hi:   oklch(45% 0.14 143);
+  --accent-ink:  oklch(99% 0.015 143);  /* near-white ink on the darker light-theme green */
+  --gold:        oklch(56% 0.13 80);
+  --danger:      oklch(52% 0.18 25);
+  --accent-soft:        oklch(94% 0.04 143);
+  --accent-soft-border: oklch(78% 0.09 143);
+  --accent-border:      oklch(74% 0.08 143);
+  --danger-soft:        oklch(95% 0.035 25);
+  --danger-border:      oklch(82% 0.10 25);
+}
+
+/* ---- Theme Toggle ---- */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 17px; height: 17px; display: block; }
+/* Dark theme offers the sun (switch to light); light theme offers the moon. */
+.theme-toggle .icon-moon { display: none; }
+:root[data-theme="light"] .theme-toggle .icon-sun  { display: none; }
+:root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
+
+.theme-toggle-fixed { position: fixed; top: 1.25rem; right: 1.25rem; z-index: 100; }
 
 /* ---- Movie Card ---- */
 .movie-card {
