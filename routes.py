@@ -191,6 +191,11 @@ def favicon():
 
 @bp.route('/<username>')
 def user_view(username):
+    # The catch-all outranks Flask's static route (string converter sorts
+    # before path), so root assets like /styles.css land here. Usernames have
+    # no dots; anything with one is a static file — hand it back to static.
+    if not _USERNAME_RE.match(username):
+        return current_app.send_static_file(username)
     return current_app.send_static_file('results.html')
 
 
